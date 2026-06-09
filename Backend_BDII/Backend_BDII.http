@@ -1,0 +1,6 @@
+@Backend_BDII_HostAddress = http://localhost:5293
+
+GET {{Backend_BDII_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

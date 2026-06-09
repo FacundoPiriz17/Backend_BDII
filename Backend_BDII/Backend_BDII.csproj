@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="BCrypt.Net-Next" Version="4.2.0" />
+        <PackageReference Include="FluentValidation.AspNetCore" Version="11.3.1" />
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.8" />
+        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.8" />
+        <PackageReference Include="Npgsql" Version="10.0.3" />
+        <PackageReference Include="QRCoder" Version="1.8.0" />
+        <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+        <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+        <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Content Include="..\.dockerignore">
+        <Link>.dockerignore</Link>
+      </Content>
+    </ItemGroup>
+
+    <ItemGroup>
+      <Folder Include="Common\Exceptions\" />
+      <Folder Include="Common\Responses\" />
+      <Folder Include="Modules\Compras\Controllers\" />
+      <Folder Include="Modules\Entradas\Controllers\" />
+      <Folder Include="Modules\Eventos\Controllers\" />
+      <Folder Include="Modules\Infraestructura\Controllers\" />
+      <Folder Include="Modules\Reportes\Controllers\" />
+      <Folder Include="Modules\Transferencias\Controllers\" />
+      <Folder Include="Modules\Validaciones\Controllers\" />
+    </ItemGroup>
+
+</Project>

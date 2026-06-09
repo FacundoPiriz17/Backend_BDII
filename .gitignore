@@ -55,7 +55,9 @@ coverage-report/
 # User secrets / environment variables
 secrets.json
 appsettings.Development.json
+**/appsettings.Development.json
 appsettings.Local.json
+**/appsettings.Local.json
 .env
 .env.*
 !.env.example

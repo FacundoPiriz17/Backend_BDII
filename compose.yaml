@@ -1,0 +1,7 @@
+﻿services:
+  backend_bdii:
+    image: backend_bdii
+    build:
+      context: .
+      dockerfile: Backend_BDII/Dockerfile
+

@@ -1,0 +1,98 @@
+using Backend_BDII.Modules.Auth.DTOs;
+using Backend_BDII.Modules.Auth.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Npgsql;
+using System.Security.Claims;
+using Backend_BDII.Modules.Usuarios.Services;
+using Backend_BDII.Modules.Usuarios.DTOs;
+namespace Backend_BDII.Modules.Auth.Controllers;
+
+[ApiController]
+[Route("api/auth")]
+public sealed class AuthController : ControllerBase
+{
+    private readonly IAuthService _authService;
+    private readonly IUsuarioService _usuarioService;
+    private readonly ILogger<AuthController> _logger;
+
+    public AuthController(
+        IAuthService authService,
+        IUsuarioService usuarioService,
+        ILogger<AuthController> logger)
+    {
+        _authService = authService;
+        _usuarioService = usuarioService;
+        _logger = logger;
+    }
+
+    [HttpPost("register")]
+    [AllowAnonymous]
+    public async Task<IActionResult> Register([FromBody] RegisterRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _authService.RegisterAsync(request, cancellationToken);
+
+            return Created("", new
+            {
+                message = "Usuario registrado correctamente."
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new
+            {
+                error = ex.Message
+            });
+        }
+        catch (PostgresException ex)
+        {
+            _logger.LogWarning(ex, "Error de PostgreSQL al registrar usuario.");
+
+            return BadRequest(new
+            {
+                error = ex.MessageText
+            });
+        }
+    }
+
+    [HttpPost("login")]
+    [AllowAnonymous]
+    public async Task<ActionResult<AuthResponse>> Login([FromBody] LoginRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await _authService.LoginAsync(request, cancellationToken);
+            return Ok(response);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Unauthorized(new
+            {
+                error = ex.Message
+            });
+        }
+    }
+    
+    [HttpGet("me")]
+    [Authorize]
+    [ProducesResponseType(typeof(MiPerfilResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<MiPerfilResponse>> Me(CancellationToken cancellationToken)
+    {
+        var email = User.FindFirstValue(ClaimTypes.Email);
+
+        if (string.IsNullOrWhiteSpace(email))
+            return Unauthorized(new { error = "No se pudo obtener el email del token." });
+
+        var perfil = await _usuarioService.GetMiPerfilAsync(email, cancellationToken);
+
+        if (perfil is null)
+            return NotFound(new { error = "Usuario no encontrado." });
+
+        return Ok(perfil);
+    }
+    
+}
