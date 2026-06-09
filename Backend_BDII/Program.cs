@@ -5,6 +5,9 @@ using Backend_BDII.Modules.Auth.Repositories;
 using Backend_BDII.Modules.Auth.Services;
 using Backend_BDII.Modules.Usuarios.Repositories;
 using Backend_BDII.Modules.Usuarios.Services;
+using Backend_BDII.Modules.Compras.Repositories;
+using Backend_BDII.Modules.Compras.Services;
+using Backend_BDII.Common.Validators.Compras;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
@@ -25,6 +28,7 @@ builder.Services.AddControllers();
 
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
+builder.Services.AddValidatorsFromAssemblyContaining<CrearCompraRequestValidator>();
 
 builder.Services.AddEndpointsApiExplorer();
 
@@ -36,7 +40,10 @@ builder.Services.AddScoped<IAuthRepository, AuthRepository>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IUsuarioRepository, UsuarioRepository>();
 builder.Services.AddScoped<IUsuarioService, UsuarioService>();
+builder.Services.AddScoped<ICompraRepository, CompraRepository>();
+builder.Services.AddScoped<ICompraService, CompraService>();
 builder.Services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
+builder.Services.AddScoped<IEntradaQrCodeService, EntradaQrCodeService>();
 
 var jwtKey = builder.Configuration["Jwt:Key"];
 
