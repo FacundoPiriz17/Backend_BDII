@@ -179,38 +179,6 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
             return null;
         }
 
-        if (nuevoEstado == "aceptada")
-        {
-            const string updateEntradaSql = """
-                UPDATE entrada e
-                SET email_propietario_actual = t.email_destino,
-                    transferencias_restantes = e.transferencias_restantes - 1
-                FROM transferencia t
-                WHERE t.id_transferencia = @id_transferencia
-                  AND t.id_entrada = e.id_entrada
-                  AND t.estado = 'aceptada'
-                  AND e.estado = 'activa'
-                  AND e.transferencias_restantes > 0
-                RETURNING e.id_entrada;
-                """;
-
-            int? idEntradaActualizada;
-
-            await using (var command = new NpgsqlCommand(updateEntradaSql, connection, transaction))
-            {
-                command.Parameters.AddWithValue("id_transferencia", idTransferencia);
-
-                var result = await command.ExecuteScalarAsync(cancellationToken);
-                idEntradaActualizada = result is null ? null : Convert.ToInt32(result);
-            }
-
-            if (idEntradaActualizada is null)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                return null;
-            }
-        }
-
         await transaction.CommitAsync(cancellationToken);
 
         return await GetByIdUsingConnectionAsync(connection, idTransferencia, emailUsuario, cancellationToken);
