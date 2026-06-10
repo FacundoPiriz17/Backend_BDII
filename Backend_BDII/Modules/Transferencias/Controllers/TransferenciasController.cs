@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Backend_BDII.Common.Responses;
 using Backend_BDII.Modules.Transferencias.DTOs;
 using Backend_BDII.Modules.Transferencias.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -31,7 +32,7 @@ public sealed class TransferenciasController : ControllerBase
         var email = GetEmailFromToken();
 
         if (email is null)
-            return Unauthorized(new { error = "No se pudo obtener el email del token." });
+            return this.UnauthorizedError("No se pudo obtener el email del token.");
 
         try
         {
@@ -40,12 +41,12 @@ public sealed class TransferenciasController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new { error = ex.Message });
+            return this.BadRequestError(ex.Message);
         }
         catch (PostgresException ex)
         {
             _logger.LogWarning(ex, "Error de PostgreSQL al crear transferencia.");
-            return BadRequest(new { error = ex.MessageText });
+            return this.BadRequestError(ex.MessageText, "database_error");
         }
     }
 
@@ -53,12 +54,14 @@ public sealed class TransferenciasController : ControllerBase
     public async Task<ActionResult<List<TransferenciaResponse>>> GetMisTransferencias(
         [FromQuery] string? relacion,
         [FromQuery] string? estado,
+        [FromQuery] int? idEntrada,
+        [FromQuery] string? busqueda,
         CancellationToken cancellationToken)
     {
         var email = GetEmailFromToken();
 
         if (email is null)
-            return Unauthorized(new { error = "No se pudo obtener el email del token." });
+            return this.UnauthorizedError("No se pudo obtener el email del token.");
 
         try
         {
@@ -66,13 +69,15 @@ public sealed class TransferenciasController : ControllerBase
                 email,
                 relacion,
                 estado,
+                idEntrada,
+                busqueda,
                 cancellationToken);
 
             return Ok(transferencias);
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new { error = ex.Message });
+            return this.BadRequestError(ex.Message);
         }
     }
 
@@ -84,12 +89,12 @@ public sealed class TransferenciasController : ControllerBase
         var email = GetEmailFromToken();
 
         if (email is null)
-            return Unauthorized(new { error = "No se pudo obtener el email del token." });
+            return this.UnauthorizedError("No se pudo obtener el email del token.");
 
         var transferencia = await _transferenciaService.GetByIdAsync(idTransferencia, email, cancellationToken);
 
         if (transferencia is null)
-            return NotFound(new { error = "Transferencia no encontrada." });
+            return this.NotFoundError("Transferencia no encontrada.");
 
         return Ok(transferencia);
     }
@@ -120,7 +125,7 @@ public sealed class TransferenciasController : ControllerBase
         var email = GetEmailFromToken();
 
         if (email is null)
-            return Unauthorized(new { error = "No se pudo obtener el email del token." });
+            return this.UnauthorizedError("No se pudo obtener el email del token.");
 
         try
         {
@@ -136,20 +141,20 @@ public sealed class TransferenciasController : ControllerBase
         }
         catch (KeyNotFoundException ex)
         {
-            return NotFound(new { error = ex.Message });
+            return this.NotFoundError(ex.Message);
         }
         catch (UnauthorizedAccessException ex)
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new { error = ex.Message });
+            return this.ForbiddenError(ex.Message);
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new { error = ex.Message });
+            return this.BadRequestError(ex.Message);
         }
         catch (PostgresException ex)
         {
             _logger.LogWarning(ex, "Error de PostgreSQL al cambiar estado de transferencia.");
-            return BadRequest(new { error = ex.MessageText });
+            return this.BadRequestError(ex.MessageText, "database_error");
         }
     }
 

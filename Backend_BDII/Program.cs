@@ -1,20 +1,31 @@
 using System.Text;
+
+using Backend_BDII.Common.Auditing;
 using Backend_BDII.Common.Database;
 using Backend_BDII.Common.Security;
+
 using Backend_BDII.Modules.Auth.Repositories;
 using Backend_BDII.Modules.Auth.Services;
+
 using Backend_BDII.Modules.Usuarios.Repositories;
 using Backend_BDII.Modules.Usuarios.Services;
+
 using Backend_BDII.Modules.Compras.Repositories;
 using Backend_BDII.Modules.Compras.Services;
+
+using Backend_BDII.Modules.Transferencias.Repositories;
+using Backend_BDII.Modules.Transferencias.Services;
+
+using Backend_BDII.Common.Validators.Auth;
 using Backend_BDII.Common.Validators.Compras;
+using Backend_BDII.Common.Validators.Transferencias;
+
+using FluentValidation;
+using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using Serilog;
-using Backend_BDII.Common.Validators.Auth;
-using FluentValidation;
-using FluentValidation.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -27,23 +38,38 @@ builder.Host.UseSerilog((context, configuration) =>
 builder.Services.AddControllers();
 
 builder.Services.AddFluentValidationAutoValidation();
+
+//Validators
 builder.Services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
 builder.Services.AddValidatorsFromAssemblyContaining<CrearCompraRequestValidator>();
+builder.Services.AddValidatorsFromAssemblyContaining<CrearTransferenciaRequestValidator>();
 
 builder.Services.AddEndpointsApiExplorer();
 
 builder.Services.AddHttpContextAccessor();
 
+//Modulos comunes
 builder.Services.AddSingleton<IDbConnectionFactory, RoleBasedNpgsqlConnectionFactory>();
+builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
-builder.Services.AddScoped<IAuthRepository, AuthRepository>();
-builder.Services.AddScoped<IAuthService, AuthService>();
-builder.Services.AddScoped<IUsuarioRepository, UsuarioRepository>();
-builder.Services.AddScoped<IUsuarioService, UsuarioService>();
-builder.Services.AddScoped<ICompraRepository, CompraRepository>();
-builder.Services.AddScoped<ICompraService, CompraService>();
 builder.Services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
 builder.Services.AddScoped<IEntradaQrCodeService, EntradaQrCodeService>();
+
+//Auth
+builder.Services.AddScoped<IAuthRepository, AuthRepository>();
+builder.Services.AddScoped<IAuthService, AuthService>();
+
+//Usuarios
+builder.Services.AddScoped<IUsuarioRepository, UsuarioRepository>();
+builder.Services.AddScoped<IUsuarioService, UsuarioService>();
+
+//Compras
+builder.Services.AddScoped<ICompraRepository, CompraRepository>();
+builder.Services.AddScoped<ICompraService, CompraService>();
+
+//Transferencias
+builder.Services.AddScoped<ITransferenciaRepository, TransferenciaRepository>();
+builder.Services.AddScoped<ITransferenciaService, TransferenciaService>();
 
 var jwtKey = builder.Configuration["Jwt:Key"];
 

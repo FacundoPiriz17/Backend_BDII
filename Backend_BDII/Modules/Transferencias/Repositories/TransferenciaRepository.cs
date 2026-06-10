@@ -39,6 +39,7 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
                 WHERE e.id_entrada = @id_entrada
                   AND LOWER(e.email_propietario_actual) = LOWER(@email_origen)
                   AND e.estado = 'activa'
+                  AND e.transferencias_restantes > 0
                   AND c.estado = 'paga'
             )
             RETURNING id_transferencia;
@@ -57,8 +58,8 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
         }
 
         if (idTransferencia is null)
-            throw new InvalidOperationException("La entrada no existe, no esta activa, no pertenece al usuario o su compra no esta paga.");
-
+            throw new InvalidOperationException("La entrada no existe, no esta activa, no pertenece al usuario, no tiene transferencias restantes o su compra no esta paga.");
+        
         return await GetByIdUsingConnectionAsync(connection, idTransferencia.Value, emailOrigen, cancellationToken)
                ?? throw new InvalidOperationException("La transferencia fue creada, pero no se pudo recuperar.");
     }
@@ -67,11 +68,14 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
         string emailUsuario,
         string relacion,
         string? estado,
+        int? idEntrada,
+        string? busqueda,
         CancellationToken cancellationToken = default)
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
 
         var sql = new StringBuilder(BaseSelectSql);
+        sql.AppendLine();
 
         sql.AppendLine(relacion switch
         {
@@ -83,6 +87,22 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
         if (!string.IsNullOrWhiteSpace(estado))
             sql.AppendLine("  AND t.estado = CAST(@estado AS estado_transferencia_enum)");
 
+        if (idEntrada.HasValue)
+            sql.AppendLine("  AND t.id_entrada = @id_entrada");
+
+        if (!string.IsNullOrWhiteSpace(busqueda))
+        {
+            sql.AppendLine("""
+                  AND (
+                    t.email_origen ILIKE @busqueda
+                    OR t.email_destino ILIKE @busqueda
+                    OR p.equipo_local ILIKE @busqueda
+                    OR p.equipo_visitante ILIKE @busqueda
+                    OR est.nombre_estadio ILIKE @busqueda
+                  )
+                """);
+        }
+
         sql.AppendLine("ORDER BY t.fecha_hora DESC, t.id_transferencia DESC;");
 
         await using var command = new NpgsqlCommand(sql.ToString(), connection);
@@ -90,6 +110,12 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
 
         if (!string.IsNullOrWhiteSpace(estado))
             command.Parameters.AddWithValue("estado", estado);
+
+        if (idEntrada.HasValue)
+            command.Parameters.AddWithValue("id_entrada", idEntrada.Value);
+
+        if (!string.IsNullOrWhiteSpace(busqueda))
+            command.Parameters.AddWithValue("busqueda", $"%{busqueda.Trim()}%");
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
@@ -112,18 +138,21 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
         return await GetByIdUsingConnectionAsync(connection, idTransferencia, emailUsuario, cancellationToken);
     }
 
-    public async Task<TransferenciaResponse?> ActualizarEstadoAsync(
-        int idTransferencia,
-        string emailUsuario,
-        string rolUsuario,
-        string nuevoEstado,
-        CancellationToken cancellationToken = default)
-    {
-        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+   public async Task<TransferenciaResponse?> ActualizarEstadoAsync(
+    int idTransferencia,
+    string emailUsuario,
+    string rolUsuario,
+    string nuevoEstado,
+    CancellationToken cancellationToken = default)
+{
+    await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+    await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
+    try
+    {
         var columnaUsuario = rolUsuario == "destino" ? "email_destino" : "email_origen";
 
-        var sql = $"""
+        var updateTransferenciaSql = $"""
             UPDATE transferencia
             SET estado = CAST(@estado AS estado_transferencia_enum)
             WHERE id_transferencia = @id_transferencia
@@ -134,7 +163,7 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
 
         int? idActualizado;
 
-        await using (var command = new NpgsqlCommand(sql, connection))
+        await using (var command = new NpgsqlCommand(updateTransferenciaSql, connection, transaction))
         {
             command.Parameters.AddWithValue("id_transferencia", idTransferencia);
             command.Parameters.AddWithValue("email_usuario", emailUsuario);
@@ -145,10 +174,53 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
         }
 
         if (idActualizado is null)
+        {
+            await transaction.RollbackAsync(cancellationToken);
             return null;
+        }
+
+        if (nuevoEstado == "aceptada")
+        {
+            const string updateEntradaSql = """
+                UPDATE entrada e
+                SET email_propietario_actual = t.email_destino,
+                    transferencias_restantes = e.transferencias_restantes - 1
+                FROM transferencia t
+                WHERE t.id_transferencia = @id_transferencia
+                  AND t.id_entrada = e.id_entrada
+                  AND t.estado = 'aceptada'
+                  AND e.estado = 'activa'
+                  AND e.transferencias_restantes > 0
+                RETURNING e.id_entrada;
+                """;
+
+            int? idEntradaActualizada;
+
+            await using (var command = new NpgsqlCommand(updateEntradaSql, connection, transaction))
+            {
+                command.Parameters.AddWithValue("id_transferencia", idTransferencia);
+
+                var result = await command.ExecuteScalarAsync(cancellationToken);
+                idEntradaActualizada = result is null ? null : Convert.ToInt32(result);
+            }
+
+            if (idEntradaActualizada is null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return null;
+            }
+        }
+
+        await transaction.CommitAsync(cancellationToken);
 
         return await GetByIdUsingConnectionAsync(connection, idTransferencia, emailUsuario, cancellationToken);
     }
+    catch
+    {
+        await transaction.RollbackAsync(cancellationToken);
+        throw;
+    }
+}
 
     public async Task<bool> TieneTransferenciaPendienteAsync(int idEntrada, CancellationToken cancellationToken = default)
     {
@@ -176,7 +248,7 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
         string emailUsuario,
         CancellationToken cancellationToken)
     {
-        var sql = BaseSelectSql + """
+        var sql = BaseSelectSql + "\n" + """
             WHERE t.id_transferencia = @id_transferencia
               AND (
                     LOWER(t.email_origen) = LOWER(@email_usuario)

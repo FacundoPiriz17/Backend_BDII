@@ -14,6 +14,8 @@ public interface ITransferenciaRepository
         string emailUsuario,
         string relacion,
         string? estado,
+        int? idEntrada,
+        string? busqueda,
         CancellationToken cancellationToken = default);
 
     Task<TransferenciaResponse?> GetByIdAsync(int idTransferencia, string emailUsuario, CancellationToken cancellationToken = default);

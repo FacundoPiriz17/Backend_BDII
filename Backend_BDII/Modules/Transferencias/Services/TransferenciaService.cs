@@ -1,3 +1,4 @@
+using Backend_BDII.Common.Auditing;
 using Backend_BDII.Modules.Transferencias.DTOs;
 using Backend_BDII.Modules.Transferencias.Repositories;
 
@@ -21,10 +22,12 @@ public sealed class TransferenciaService : ITransferenciaService
     };
 
     private readonly ITransferenciaRepository _transferenciaRepository;
+    private readonly IAuditService _auditService;
 
-    public TransferenciaService(ITransferenciaRepository transferenciaRepository)
+    public TransferenciaService(ITransferenciaRepository transferenciaRepository, IAuditService auditService)
     {
         _transferenciaRepository = transferenciaRepository;
+        _auditService = auditService;
     }
 
     public async Task<TransferenciaResponse> CrearAsync(
@@ -48,13 +51,24 @@ public sealed class TransferenciaService : ITransferenciaService
         if (await _transferenciaRepository.TieneTransferenciaPendienteAsync(request.IdEntrada, cancellationToken))
             throw new InvalidOperationException("La entrada ya tiene una transferencia pendiente.");
 
-        return await _transferenciaRepository.CrearAsync(origen, destino, request.IdEntrada, cancellationToken);
+        var transferencia = await _transferenciaRepository.CrearAsync(origen, destino, request.IdEntrada, cancellationToken);
+
+        _auditService.Record("transferencia.crear", origen, new
+        {
+            transferencia.IdTransferencia,
+            transferencia.Entrada.IdEntrada,
+            transferencia.EmailDestino
+        });
+
+        return transferencia;
     }
 
     public Task<List<TransferenciaResponse>> GetMisTransferenciasAsync(
         string emailUsuario,
         string? relacion,
         string? estado,
+        int? idEntrada,
+        string? busqueda,
         CancellationToken cancellationToken = default)
     {
         var relacionNormalizada = string.IsNullOrWhiteSpace(relacion)
@@ -75,6 +89,8 @@ public sealed class TransferenciaService : ITransferenciaService
             NormalizeEmail(emailUsuario),
             relacionNormalizada,
             estadoNormalizado,
+            idEntrada,
+            busqueda,
             cancellationToken);
     }
 
@@ -133,13 +149,21 @@ public sealed class TransferenciaService : ITransferenciaService
         if (rolUsuario == "origen" && !esOrigen)
             throw new UnauthorizedAccessException("Solo el origen puede cancelar la transferencia.");
 
-        return await _transferenciaRepository.ActualizarEstadoAsync(
+        var transferenciaActualizada = await _transferenciaRepository.ActualizarEstadoAsync(
                    idTransferencia,
                    email,
                    rolUsuario,
                    nuevoEstado,
                    cancellationToken)
                ?? throw new InvalidOperationException("No se pudo actualizar la transferencia.");
+
+        _auditService.Record($"transferencia.{nuevoEstado}", email, new
+        {
+            transferenciaActualizada.IdTransferencia,
+            transferenciaActualizada.Entrada.IdEntrada
+        });
+
+        return transferenciaActualizada;
     }
 
     private static string NormalizeEmail(string email)
