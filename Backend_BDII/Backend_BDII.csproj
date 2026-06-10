@@ -27,7 +27,6 @@
 
     <ItemGroup>
       <Folder Include="Common\Exceptions\" />
-      <Folder Include="Common\Responses\" />
       <Folder Include="Modules\Compras\Controllers\" />
       <Folder Include="Modules\Entradas\Controllers\" />
       <Folder Include="Modules\Eventos\Controllers\" />

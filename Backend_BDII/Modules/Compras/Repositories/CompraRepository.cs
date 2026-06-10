@@ -1,3 +1,4 @@
+using System.Text;
 using Backend_BDII.Common.Database;
 using Backend_BDII.Modules.Compras.DTOs;
 using Backend_BDII.Modules.Compras.Models;
@@ -91,11 +92,15 @@ public sealed class CompraRepository : ICompraRepository
         }
     }
 
-    public async Task<List<CompraResponse>> GetByUsuarioAsync(string emailUsuario, CancellationToken cancellationToken = default)
+    public async Task<List<CompraResponse>> GetByUsuarioAsync(
+        string emailUsuario,
+        string? estado,
+        int? idPartido,
+        CancellationToken cancellationToken = default)
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
 
-        const string sql = """
+        var sql = new StringBuilder("""
             SELECT
                 c.id_compra,
                 c.fecha_hora,
@@ -105,11 +110,34 @@ public sealed class CompraRepository : ICompraRepository
                 c.estado::text AS estado
             FROM compra c
             WHERE LOWER(c.email_usuario) = LOWER(@email_usuario)
-            ORDER BY c.fecha_hora DESC, c.id_compra DESC;
-            """;
+            """);
+        sql.AppendLine();
 
-        await using var command = new NpgsqlCommand(sql, connection);
+        if (!string.IsNullOrWhiteSpace(estado))
+            sql.AppendLine("AND c.estado = CAST(@estado AS estado_compra_enum)");
+
+        if (idPartido.HasValue)
+        {
+            sql.AppendLine("""
+                AND EXISTS (
+                    SELECT 1
+                    FROM entrada e
+                    WHERE e.id_compra = c.id_compra
+                      AND e.id_partido = @id_partido
+                )
+                """);
+        }
+
+        sql.AppendLine("ORDER BY c.fecha_hora DESC, c.id_compra DESC;");
+
+        await using var command = new NpgsqlCommand(sql.ToString(), connection);
         command.Parameters.AddWithValue("email_usuario", emailUsuario);
+
+        if (!string.IsNullOrWhiteSpace(estado))
+            command.Parameters.AddWithValue("estado", estado);
+
+        if (idPartido.HasValue)
+            command.Parameters.AddWithValue("id_partido", idPartido.Value);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
@@ -141,11 +169,16 @@ public sealed class CompraRepository : ICompraRepository
         return await GetByIdUsingConnectionAsync(connection, idCompra, emailUsuario, null, cancellationToken);
     }
 
-    public async Task<List<EntradaResponse>> GetEntradasAsignadasAsync(string emailUsuario, CancellationToken cancellationToken = default)
+    public async Task<List<EntradaResponse>> GetEntradasAsignadasAsync(
+        string emailUsuario,
+        string? estado,
+        int? idPartido,
+        string? busqueda,
+        CancellationToken cancellationToken = default)
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
 
-        const string sql = """
+        var sql = new StringBuilder("""
             SELECT
                 e.id_entrada,
                 e.fecha_hora,
@@ -172,12 +205,42 @@ public sealed class CompraRepository : ICompraRepository
             INNER JOIN partido p ON p.id_partido = e.id_partido
             INNER JOIN estadio est ON est.id_estadio = e.id_estadio
             WHERE LOWER(e.email_propietario_actual) = LOWER(@email_usuario)
-              AND c.estado = 'paga'
-            ORDER BY p.fecha, p.hora, e.id_entrada;
-            """;
+              AND c.estado = 'paga'   AND e.estado = 'activa'
+              AND e.estado = 'activa'
+            """);
+        sql.AppendLine();
 
-        await using var command = new NpgsqlCommand(sql, connection);
+        if (!string.IsNullOrWhiteSpace(estado))
+            sql.AppendLine("AND e.estado = CAST(@estado AS estado_entrada_enum)");
+
+        if (idPartido.HasValue)
+            sql.AppendLine("AND p.id_partido = @id_partido");
+
+        if (!string.IsNullOrWhiteSpace(busqueda))
+        {
+            sql.AppendLine("""
+                AND (
+                    p.equipo_local ILIKE @busqueda
+                    OR p.equipo_visitante ILIKE @busqueda
+                    OR est.nombre_estadio ILIKE @busqueda
+                    OR est.ciudad ILIKE @busqueda
+                )
+                """);
+        }
+
+        sql.AppendLine("ORDER BY p.fecha, p.hora, e.id_entrada;");
+
+        await using var command = new NpgsqlCommand(sql.ToString(), connection);
         command.Parameters.AddWithValue("email_usuario", emailUsuario);
+
+        if (!string.IsNullOrWhiteSpace(estado))
+            command.Parameters.AddWithValue("estado", estado);
+
+        if (idPartido.HasValue)
+            command.Parameters.AddWithValue("id_partido", idPartido.Value);
+
+        if (!string.IsNullOrWhiteSpace(busqueda))
+            command.Parameters.AddWithValue("busqueda", $"%{busqueda.Trim()}%");
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
@@ -212,7 +275,9 @@ public sealed class CompraRepository : ICompraRepository
                 ps.nombre_sector::text AS nombre_sector,
                 COALESCE(s.capacidad, 0) AS capacidad,
                 COALESCE(s.costo, 0) AS costo_sector,
-                COUNT(e.id_entrada)::int AS entradas_vendidas
+                COUNT(e.id_entrada) FILTER (
+                WHERE e.estado <> 'cancelada'
+                )::int AS entradas_vendidas
             FROM partido p
             INNER JOIN estadio est ON est.id_estadio = p.id_estadio
             INNER JOIN partido_sector ps ON ps.id_partido = p.id_partido AND ps.id_estadio = p.id_estadio
@@ -326,62 +391,74 @@ public sealed class CompraRepository : ICompraRepository
         return await GetByIdUsingConnectionAsync(connection, idCompra, emailUsuario, null, cancellationToken);
     }
 
-    public async Task<CompraResponse?> CancelarAsync(int idCompra, string emailUsuario, CancellationToken cancellationToken = default)
+    public async Task<CompraResponse?> CancelarAsync(
+    int idCompra,
+    string emailUsuario,
+    CancellationToken cancellationToken = default)
+{
+    await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+    await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+    try
     {
-        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        const string cancelarEntradasSql = """
+            UPDATE entrada e
+            SET estado = 'cancelada'
+            FROM compra c
+            WHERE c.id_compra = e.id_compra
+              AND c.id_compra = @id_compra
+              AND LOWER(c.email_usuario) = LOWER(@email_usuario)
+              AND c.estado IN ('pendiente', 'confirmada')
+              AND e.estado = 'activa';
+            """;
 
-        try
+        await using (var command = new NpgsqlCommand(cancelarEntradasSql, connection, transaction))
         {
-            const string deleteEntradasSql = """
-                DELETE FROM entrada e
-                USING compra c
-                WHERE c.id_compra = e.id_compra
-                  AND c.id_compra = @id_compra
-                  AND LOWER(c.email_usuario) = LOWER(@email_usuario);
-                """;
-
-            await using (var command = new NpgsqlCommand(deleteEntradasSql, connection, transaction))
-            {
-                command.Parameters.AddWithValue("id_compra", idCompra);
-                command.Parameters.AddWithValue("email_usuario", emailUsuario);
-                await command.ExecuteNonQueryAsync(cancellationToken);
-            }
-
-            const string updateCompraSql = """
-                UPDATE compra
-                SET estado = 'cancelada'
-                WHERE id_compra = @id_compra
-                  AND LOWER(email_usuario) = LOWER(@email_usuario);
-                """;
-
-            int affectedRows;
-
-            await using (var command = new NpgsqlCommand(updateCompraSql, connection, transaction))
-            {
-                command.Parameters.AddWithValue("id_compra", idCompra);
-                command.Parameters.AddWithValue("email_usuario", emailUsuario);
-                affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);
-            }
-
-            if (affectedRows == 0)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                return null;
-            }
-
-            var compra = await GetByIdUsingConnectionAsync(connection, idCompra, emailUsuario, transaction, cancellationToken);
-
-            await transaction.CommitAsync(cancellationToken);
-
-            return compra;
+            command.Parameters.AddWithValue("id_compra", idCompra);
+            command.Parameters.AddWithValue("email_usuario", emailUsuario);
+            await command.ExecuteNonQueryAsync(cancellationToken);
         }
-        catch
+
+        const string updateCompraSql = """
+            UPDATE compra
+            SET estado = 'cancelada'
+            WHERE id_compra = @id_compra
+              AND LOWER(email_usuario) = LOWER(@email_usuario)
+              AND estado IN ('pendiente', 'confirmada');
+            """;
+
+        int affectedRows;
+
+        await using (var command = new NpgsqlCommand(updateCompraSql, connection, transaction))
+        {
+            command.Parameters.AddWithValue("id_compra", idCompra);
+            command.Parameters.AddWithValue("email_usuario", emailUsuario);
+            affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        if (affectedRows == 0)
         {
             await transaction.RollbackAsync(cancellationToken);
-            throw;
+            return null;
         }
+
+        var compra = await GetByIdUsingConnectionAsync(
+            connection,
+            idCompra,
+            emailUsuario,
+            transaction,
+            cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
+
+        return compra;
     }
+    catch
+    {
+        await transaction.RollbackAsync(cancellationToken);
+        throw;
+    }
+}
 
     public async Task<string?> ActualizarQrEntradaAsync(
         int idEntrada,
