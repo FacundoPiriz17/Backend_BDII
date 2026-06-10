@@ -16,9 +16,13 @@ using Backend_BDII.Modules.Compras.Services;
 using Backend_BDII.Modules.Transferencias.Repositories;
 using Backend_BDII.Modules.Transferencias.Services;
 
+using Backend_BDII.Modules.Validaciones.Repositories;
+using Backend_BDII.Modules.Validaciones.Services;
+
 using Backend_BDII.Common.Validators.Auth;
 using Backend_BDII.Common.Validators.Compras;
 using Backend_BDII.Common.Validators.Transferencias;
+using Backend_BDII.Common.Validators.Validaciones;
 
 using FluentValidation;
 using FluentValidation.AspNetCore;
@@ -43,6 +47,7 @@ builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
 builder.Services.AddValidatorsFromAssemblyContaining<CrearCompraRequestValidator>();
 builder.Services.AddValidatorsFromAssemblyContaining<CrearTransferenciaRequestValidator>();
+builder.Services.AddValidatorsFromAssemblyContaining<EscanearQrRequestValidator>();
 
 builder.Services.AddEndpointsApiExplorer();
 
@@ -70,6 +75,10 @@ builder.Services.AddScoped<ICompraService, CompraService>();
 //Transferencias
 builder.Services.AddScoped<ITransferenciaRepository, TransferenciaRepository>();
 builder.Services.AddScoped<ITransferenciaService, TransferenciaService>();
+
+//Validaciones
+builder.Services.AddScoped<IValidacionRepository, ValidacionRepository>();
+builder.Services.AddScoped<IValidacionService, ValidacionService>();
 
 var jwtKey = builder.Configuration["Jwt:Key"];
 
