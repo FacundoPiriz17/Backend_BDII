@@ -25,3 +25,8 @@ public class EntradasResponse
     public required string emailPropietarioActual { get; init; }
     
 }
+
+public class ActualizarEstadoEntradaRequest
+{
+    public required string NuevoEstado { get; init; }
+}
