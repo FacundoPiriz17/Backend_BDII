@@ -1,31 +1,27 @@
-namespace Backend_BDII.Modules.Compras.DTOs;
+namespace Backend_BDII.Modules.Transferencias.DTOs;
 
-public sealed class CompraResponse
+public sealed class TransferenciaResponse
 {
-    public required int IdCompra { get; init; }
+    public required int IdTransferencia { get; init; }
     public required DateTime FechaHora { get; init; }
-    public required int MontoTotal { get; init; }
-    public required double PorcentajeComision { get; init; }
-    public required string EmailUsuario { get; init; }
+    public required string EmailOrigen { get; init; }
+    public required string EmailDestino { get; init; }
     public required string Estado { get; init; }
-    public required List<EntradaResponse> Entradas { get; init; }
+    public required EntradaTransferenciaResponse Entrada { get; init; }
 }
 
-public sealed class EntradaResponse
+public sealed class EntradaTransferenciaResponse
 {
     public required int IdEntrada { get; init; }
-    public required DateTime FechaHora { get; init; }
     public required string Estado { get; init; }
-    public string? CodigoQr { get; init; }
     public required int CostoTotal { get; init; }
     public required int TransferenciasRestantes { get; init; }
-    public required int IdCompra { get; init; }
     public required string NombreSector { get; init; }
     public required string EmailPropietarioActual { get; init; }
-    public required PartidoEntradaResponse Partido { get; init; }
+    public required PartidoTransferenciaResponse Partido { get; init; }
 }
 
-public sealed class PartidoEntradaResponse
+public sealed class PartidoTransferenciaResponse
 {
     public required int IdPartido { get; init; }
     public required DateOnly Fecha { get; init; }
@@ -34,10 +30,10 @@ public sealed class PartidoEntradaResponse
     public required string EquipoVisitante { get; init; }
     public required string Fase { get; init; }
     public required string Estado { get; init; }
-    public required EstadioEntradaResponse Estadio { get; init; }
+    public required EstadioTransferenciaResponse Estadio { get; init; }
 }
 
-public sealed class EstadioEntradaResponse
+public sealed class EstadioTransferenciaResponse
 {
     public required int IdEstadio { get; init; }
     public required string Nombre { get; init; }

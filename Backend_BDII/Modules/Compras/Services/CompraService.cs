@@ -1,4 +1,5 @@
 using Backend_BDII.Common.Security;
+using Backend_BDII.Common.Auditing;
 using Backend_BDII.Modules.Compras.DTOs;
 using Backend_BDII.Modules.Compras.Models;
 using Backend_BDII.Modules.Compras.Repositories;
@@ -17,11 +18,16 @@ public sealed class CompraService : ICompraService
 
     private readonly ICompraRepository _compraRepository;
     private readonly IEntradaQrCodeService _qrCodeService;
+    private readonly IAuditService _auditService;
 
-    public CompraService(ICompraRepository compraRepository, IEntradaQrCodeService qrCodeService)
+    public CompraService(
+        ICompraRepository compraRepository,
+        IEntradaQrCodeService qrCodeService,
+        IAuditService auditService)
     {
         _compraRepository = compraRepository;
         _qrCodeService = qrCodeService;
+        _auditService = auditService;
     }
 
     public async Task<CompraResponse> CrearAsync(
@@ -38,12 +44,29 @@ public sealed class CompraService : ICompraService
         if (entradas.Count > 5)
             throw new InvalidOperationException("No se pueden comprar mas de 5 entradas en la misma transaccion.");
 
-        return await _compraRepository.CrearAsync(email, entradas, cancellationToken);
+        var compra = await _compraRepository.CrearAsync(email, entradas, cancellationToken);
+
+        _auditService.Record("compra.crear", email, new
+        {
+            compra.IdCompra,
+            Entradas = compra.Entradas.Count,
+            compra.MontoTotal
+        });
+
+        return compra;
     }
 
-    public Task<List<CompraResponse>> GetMisComprasAsync(string emailUsuario, CancellationToken cancellationToken = default)
+    public Task<List<CompraResponse>> GetMisComprasAsync(
+        string emailUsuario,
+        string? estado,
+        int? idPartido,
+        CancellationToken cancellationToken = default)
     {
-        return _compraRepository.GetByUsuarioAsync(NormalizeEmail(emailUsuario), cancellationToken);
+        return _compraRepository.GetByUsuarioAsync(
+            NormalizeEmail(emailUsuario),
+            NormalizeEstadoCompra(estado),
+            idPartido,
+            cancellationToken);
     }
 
     public Task<CompraResponse?> GetByIdAsync(int idCompra, string emailUsuario, CancellationToken cancellationToken = default)
@@ -51,9 +74,19 @@ public sealed class CompraService : ICompraService
         return _compraRepository.GetByIdAsync(idCompra, NormalizeEmail(emailUsuario), cancellationToken);
     }
 
-    public Task<List<EntradaResponse>> GetMisEntradasAsync(string emailUsuario, CancellationToken cancellationToken = default)
+    public Task<List<EntradaResponse>> GetMisEntradasAsync(
+        string emailUsuario,
+        string? estado,
+        int? idPartido,
+        string? busqueda,
+        CancellationToken cancellationToken = default)
     {
-        return _compraRepository.GetEntradasAsignadasAsync(NormalizeEmail(emailUsuario), cancellationToken);
+        return _compraRepository.GetEntradasAsignadasAsync(
+            NormalizeEmail(emailUsuario),
+            NormalizeEstadoEntrada(estado),
+            idPartido,
+            busqueda,
+            cancellationToken);
     }
 
     public Task<List<PartidoDisponibleResponse>> GetPartidosDisponiblesAsync(CancellationToken cancellationToken = default)
@@ -69,8 +102,12 @@ public sealed class CompraService : ICompraService
         if (compra.Estado != "pendiente")
             throw new InvalidOperationException("Solo se pueden confirmar compras pendientes.");
 
-        return await _compraRepository.ActualizarEstadoAsync(idCompra, email, "confirmada", cancellationToken)
-               ?? throw new KeyNotFoundException("Compra no encontrada.");
+        var compraActualizada = await _compraRepository.ActualizarEstadoAsync(idCompra, email, "confirmada", cancellationToken)
+                               ?? throw new KeyNotFoundException("Compra no encontrada.");
+
+        _auditService.Record("compra.confirmar", email, new { IdCompra = idCompra });
+
+        return compraActualizada;
     }
 
     public async Task<CompraResponse> PagarAsync(int idCompra, string emailUsuario, CancellationToken cancellationToken = default)
@@ -81,8 +118,12 @@ public sealed class CompraService : ICompraService
         if (compra.Estado is not ("pendiente" or "confirmada"))
             throw new InvalidOperationException("Solo se pueden pagar compras pendientes o confirmadas.");
 
-        return await _compraRepository.ActualizarEstadoAsync(idCompra, email, "paga", cancellationToken)
-               ?? throw new KeyNotFoundException("Compra no encontrada.");
+        var compraActualizada = await _compraRepository.ActualizarEstadoAsync(idCompra, email, "paga", cancellationToken)
+                               ?? throw new KeyNotFoundException("Compra no encontrada.");
+
+        _auditService.Record("compra.pagar", email, new { IdCompra = idCompra });
+
+        return compraActualizada;
     }
 
     public async Task<CompraResponse> CancelarAsync(int idCompra, string emailUsuario, CancellationToken cancellationToken = default)
@@ -96,8 +137,12 @@ public sealed class CompraService : ICompraService
         if (compra.Estado == "cancelada")
             throw new InvalidOperationException("La compra ya esta cancelada.");
 
-        return await _compraRepository.CancelarAsync(idCompra, email, cancellationToken)
-               ?? throw new KeyNotFoundException("Compra no encontrada.");
+        var compraActualizada = await _compraRepository.CancelarAsync(idCompra, email, cancellationToken)
+                               ?? throw new KeyNotFoundException("Compra no encontrada.");
+
+        _auditService.Record("compra.cancelar", email, new { IdCompra = idCompra });
+
+        return compraActualizada;
     }
 
     public async Task<QrEntradaResponse> RegenerarQrAsync(
@@ -111,6 +156,8 @@ public sealed class CompraService : ICompraService
 
         if (codigoQr is null)
             throw new InvalidOperationException("La entrada no existe, no esta activa, no pertenece al usuario o la compra no esta paga.");
+
+        _auditService.Record("entrada.qr_regenerar", email, new { IdEntrada = idEntrada });
 
         return new QrEntradaResponse
         {
@@ -170,5 +217,27 @@ public sealed class CompraService : ICompraService
     private static string NormalizeEmail(string email)
     {
         return email.Trim().ToLowerInvariant();
+    }
+
+    private static string? NormalizeEstadoCompra(string? estado)
+    {
+        if (string.IsNullOrWhiteSpace(estado))
+            return null;
+
+        var normalized = estado.Trim().ToLowerInvariant();
+        return normalized is "pendiente" or "confirmada" or "cancelada" or "paga"
+            ? normalized
+            : throw new InvalidOperationException("El estado de compra debe ser pendiente, confirmada, cancelada o paga.");
+    }
+
+    private static string? NormalizeEstadoEntrada(string? estado)
+    {
+        if (string.IsNullOrWhiteSpace(estado))
+            return null;
+
+        var normalized = estado.Trim().ToLowerInvariant();
+        return normalized is "activa" or "consumida"
+            ? normalized
+            : throw new InvalidOperationException("El estado de entrada debe ser activa o consumida.");
     }
 }

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Backend_BDII.Common.Responses;
 using Backend_BDII.Modules.Compras.DTOs;
 using Backend_BDII.Modules.Compras.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -34,7 +35,7 @@ public sealed class ComprasController : ControllerBase
         var email = GetEmailFromToken();
 
         if (email is null)
-            return Unauthorized(new { error = "No se pudo obtener el email del token." });
+            return this.UnauthorizedError("No se pudo obtener el email del token.");
 
         try
         {
@@ -43,25 +44,35 @@ public sealed class ComprasController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new { error = ex.Message });
+            return this.BadRequestError(ex.Message);
         }
         catch (PostgresException ex)
         {
             _logger.LogWarning(ex, "Error de PostgreSQL al crear compra.");
-            return BadRequest(new { error = ex.MessageText });
+            return this.BadRequestError(ex.MessageText, "database_error");
         }
     }
 
     [HttpGet]
-    public async Task<ActionResult<List<CompraResponse>>> GetMisCompras(CancellationToken cancellationToken)
+    public async Task<ActionResult<List<CompraResponse>>> GetMisCompras(
+        [FromQuery] string? estado,
+        [FromQuery] int? idPartido,
+        CancellationToken cancellationToken)
     {
         var email = GetEmailFromToken();
 
         if (email is null)
-            return Unauthorized(new { error = "No se pudo obtener el email del token." });
+            return this.UnauthorizedError("No se pudo obtener el email del token.");
 
-        var compras = await _compraService.GetMisComprasAsync(email, cancellationToken);
-        return Ok(compras);
+        try
+        {
+            var compras = await _compraService.GetMisComprasAsync(email, estado, idPartido, cancellationToken);
+            return Ok(compras);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return this.BadRequestError(ex.Message);
+        }
     }
 
     [HttpGet("{idCompra:int}")]
@@ -70,26 +81,37 @@ public sealed class ComprasController : ControllerBase
         var email = GetEmailFromToken();
 
         if (email is null)
-            return Unauthorized(new { error = "No se pudo obtener el email del token." });
+            return this.UnauthorizedError("No se pudo obtener el email del token.");
 
         var compra = await _compraService.GetByIdAsync(idCompra, email, cancellationToken);
 
         if (compra is null)
-            return NotFound(new { error = "Compra no encontrada." });
+            return this.NotFoundError("Compra no encontrada.");
 
         return Ok(compra);
     }
 
     [HttpGet("mis-entradas")]
-    public async Task<ActionResult<List<EntradaResponse>>> GetMisEntradas(CancellationToken cancellationToken)
+    public async Task<ActionResult<List<EntradaResponse>>> GetMisEntradas(
+        [FromQuery] string? estado,
+        [FromQuery] int? idPartido,
+        [FromQuery] string? busqueda,
+        CancellationToken cancellationToken)
     {
         var email = GetEmailFromToken();
 
         if (email is null)
-            return Unauthorized(new { error = "No se pudo obtener el email del token." });
+            return this.UnauthorizedError("No se pudo obtener el email del token.");
 
-        var entradas = await _compraService.GetMisEntradasAsync(email, cancellationToken);
-        return Ok(entradas);
+        try
+        {
+            var entradas = await _compraService.GetMisEntradasAsync(email, estado, idPartido, busqueda, cancellationToken);
+            return Ok(entradas);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return this.BadRequestError(ex.Message);
+        }
     }
 
     [HttpPost("{idCompra:int}/confirmar")]
@@ -116,7 +138,7 @@ public sealed class ComprasController : ControllerBase
         var email = GetEmailFromToken();
 
         if (email is null)
-            return Unauthorized(new { error = "No se pudo obtener el email del token." });
+            return this.UnauthorizedError("No se pudo obtener el email del token.");
 
         try
         {
@@ -125,7 +147,7 @@ public sealed class ComprasController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new { error = ex.Message });
+            return this.BadRequestError(ex.Message);
         }
     }
 
@@ -137,7 +159,7 @@ public sealed class ComprasController : ControllerBase
         var email = GetEmailFromToken();
 
         if (email is null)
-            return Unauthorized(new { error = "No se pudo obtener el email del token." });
+            return this.UnauthorizedError("No se pudo obtener el email del token.");
 
         try
         {
@@ -153,16 +175,16 @@ public sealed class ComprasController : ControllerBase
         }
         catch (KeyNotFoundException ex)
         {
-            return NotFound(new { error = ex.Message });
+            return this.NotFoundError(ex.Message);
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new { error = ex.Message });
+            return this.BadRequestError(ex.Message);
         }
         catch (PostgresException ex)
         {
             _logger.LogWarning(ex, "Error de PostgreSQL al cambiar estado de compra.");
-            return BadRequest(new { error = ex.MessageText });
+            return this.BadRequestError(ex.MessageText, "database_error");
         }
     }
 
