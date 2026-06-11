@@ -13,6 +13,8 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using Serilog;
 using Backend_BDII.Common.Validators.Auth;
+using Backend_BDII.Modules.Entradas.Repositories;
+using Backend_BDII.Modules.Entradas.Services;
 using FluentValidation;
 using FluentValidation.AspNetCore;
 
@@ -44,6 +46,9 @@ builder.Services.AddScoped<ICompraRepository, CompraRepository>();
 builder.Services.AddScoped<ICompraService, CompraService>();
 builder.Services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
 builder.Services.AddScoped<IEntradaQrCodeService, EntradaQrCodeService>();
+builder.Services.AddScoped<IEntradaRepository, EntradaRepository>();
+builder.Services.AddScoped<IEntradaService, EntradaService>();
+
 
 var jwtKey = builder.Configuration["Jwt:Key"];
 
