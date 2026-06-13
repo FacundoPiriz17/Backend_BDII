@@ -10,7 +10,7 @@
     <ItemGroup>
         <PackageReference Include="BCrypt.Net-Next" Version="4.2.0" />
         <PackageReference Include="FluentValidation.AspNetCore" Version="11.3.1" />
-        <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.8" />
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.9" />
         <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.8" />
         <PackageReference Include="Npgsql" Version="10.0.3" />
         <PackageReference Include="QRCoder" Version="1.8.0" />
@@ -28,7 +28,7 @@
     <ItemGroup>
       <Folder Include="Common\Exceptions\" />
       <Folder Include="Modules\Compras\Controllers\" />
-      <Folder Include="Modules\Entradas\Controllers\" />
+      <Folder Include="Modules\Compras\DTOs\" />
       <Folder Include="Modules\Eventos\Controllers\" />
       <Folder Include="Modules\Infraestructura\Models\" />
       <Folder Include="Modules\Reportes\Controllers\" />

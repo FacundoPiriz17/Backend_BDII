@@ -23,7 +23,8 @@ using Backend_BDII.Common.Validators.Auth;
 using Backend_BDII.Common.Validators.Compras;
 using Backend_BDII.Common.Validators.Transferencias;
 using Backend_BDII.Common.Validators.Validaciones;
-
+using Backend_BDII.Modules.Entradas.Repositories;
+using Backend_BDII.Modules.Entradas.Services;
 using FluentValidation;
 using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -72,6 +73,10 @@ builder.Services.AddScoped<IUsuarioService, UsuarioService>();
 builder.Services.AddScoped<ICompraRepository, CompraRepository>();
 builder.Services.AddScoped<ICompraService, CompraService>();
 
+//Entradas
+builder.Services.AddScoped<IEntradaRepository, EntradaRepository>();
+builder.Services.AddScoped<IEntradaService, EntradaService>();
+
 //Transferencias
 builder.Services.AddScoped<ITransferenciaRepository, TransferenciaRepository>();
 builder.Services.AddScoped<ITransferenciaService, TransferenciaService>();
@@ -81,6 +86,7 @@ builder.Services.AddScoped<IValidacionRepository, ValidacionRepository>();
 builder.Services.AddScoped<IValidacionService, ValidacionService>();
 
 //Infraestructura
+
 
 var jwtKey = builder.Configuration["Jwt:Key"];
 
