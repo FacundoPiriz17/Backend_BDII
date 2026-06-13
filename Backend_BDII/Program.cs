@@ -13,18 +13,24 @@ using Backend_BDII.Modules.Usuarios.Services;
 using Backend_BDII.Modules.Compras.Repositories;
 using Backend_BDII.Modules.Compras.Services;
 
+using Backend_BDII.Modules.Entradas.Repositories;
+using Backend_BDII.Modules.Entradas.Services;
+
 using Backend_BDII.Modules.Transferencias.Repositories;
 using Backend_BDII.Modules.Transferencias.Services;
 
 using Backend_BDII.Modules.Validaciones.Repositories;
 using Backend_BDII.Modules.Validaciones.Services;
 
+using Backend_BDII.Modules.Infraestructura.Repositories;
+using Backend_BDII.Modules.Infraestructura.Services;
+
 using Backend_BDII.Common.Validators.Auth;
 using Backend_BDII.Common.Validators.Compras;
 using Backend_BDII.Common.Validators.Transferencias;
 using Backend_BDII.Common.Validators.Validaciones;
-using Backend_BDII.Modules.Entradas.Repositories;
-using Backend_BDII.Modules.Entradas.Services;
+
+
 using FluentValidation;
 using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -86,6 +92,8 @@ builder.Services.AddScoped<IValidacionRepository, ValidacionRepository>();
 builder.Services.AddScoped<IValidacionService, ValidacionService>();
 
 //Infraestructura
+builder.Services.AddScoped<IInfraestructuraRepository, InfraestructuraRepository>();
+builder.Services.AddScoped<IInfraestructuraService, InfraestructuraService>();
 
 
 var jwtKey = builder.Configuration["Jwt:Key"];
