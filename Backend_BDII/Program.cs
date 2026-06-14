@@ -25,10 +25,17 @@ using Backend_BDII.Modules.Validaciones.Services;
 using Backend_BDII.Modules.Infraestructura.Repositories;
 using Backend_BDII.Modules.Infraestructura.Services;
 
+using Backend_BDII.Modules.Eventos.Repositories;
+using Backend_BDII.Modules.Eventos.Services;
+
+using Backend_BDII.Modules.Reportes.Repositories;
+using Backend_BDII.Modules.Reportes.Services;
+
 using Backend_BDII.Common.Validators.Auth;
 using Backend_BDII.Common.Validators.Compras;
 using Backend_BDII.Common.Validators.Transferencias;
 using Backend_BDII.Common.Validators.Validaciones;
+using Backend_BDII.Common.Validators.Eventos;
 
 
 using FluentValidation;
@@ -55,6 +62,7 @@ builder.Services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>()
 builder.Services.AddValidatorsFromAssemblyContaining<CrearCompraRequestValidator>();
 builder.Services.AddValidatorsFromAssemblyContaining<CrearTransferenciaRequestValidator>();
 builder.Services.AddValidatorsFromAssemblyContaining<EscanearQrRequestValidator>();
+builder.Services.AddValidatorsFromAssemblyContaining<CrearEventoRequestValidator>();
 
 builder.Services.AddEndpointsApiExplorer();
 
@@ -94,6 +102,14 @@ builder.Services.AddScoped<IValidacionService, ValidacionService>();
 //Infraestructura
 builder.Services.AddScoped<IInfraestructuraRepository, InfraestructuraRepository>();
 builder.Services.AddScoped<IInfraestructuraService, InfraestructuraService>();
+
+//Eventos
+builder.Services.AddScoped<IEventoRepository, EventoRepository>();
+builder.Services.AddScoped<IEventoService, EventoService>();
+
+//Reportes
+builder.Services.AddScoped<IReporteRepository, ReporteRepository>();
+builder.Services.AddScoped<IReporteService, ReporteService>();
 
 
 var jwtKey = builder.Configuration["Jwt:Key"];
