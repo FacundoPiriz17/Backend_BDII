@@ -1,8 +1,7 @@
-using System.Security.Claims;
 using Npgsql;
 
 namespace Backend_BDII.Common.Database;
-
+//Esta clase contiene la lógica de permitir la conexión entre el Backend con la base de datos en PostgreSql
 public sealed class RoleBasedNpgsqlConnectionFactory : IDbConnectionFactory, IDisposable
 {
     private readonly IHttpContextAccessor _httpContextAccessor;

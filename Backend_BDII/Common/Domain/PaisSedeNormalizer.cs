@@ -2,7 +2,7 @@ using System.Globalization;
 using System.Text;
 
 namespace Backend_BDII.Common.Domain;
-
+//Esta clase es un normalizador el cual facilita la experiencia de Usuario transformando ciertos nombres o caracteres en otros que sean útiles
 public static class PaisSedeNormalizer
 {
     public static string Normalize(string pais)
@@ -18,7 +18,7 @@ public static class PaisSedeNormalizer
             _ => trimmed
         };
     }
-
+//Este metodo elimina tildes, diéresis, entre otras cosas
     private static string RemoveDiacritics(string value)
     {
         var normalized = value.Normalize(NormalizationForm.FormD);

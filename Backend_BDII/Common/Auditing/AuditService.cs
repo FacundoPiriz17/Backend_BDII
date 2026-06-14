@@ -8,7 +8,7 @@ public sealed class AuditService : IAuditService
     {
         _logger = logger;
     }
-
+//Este método permite que se guarde cada acción en los logs del sistema
     public void Record(string action, string? actorEmail, object? details = null)
     {
         _logger.LogInformation(

@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using QRCoder;
 
 namespace Backend_BDII.Common.Security;
-
+//Esta clase tiene la lógica de generación del QR, el primer método genera el código y el segundo la imagen del mismo
 public sealed class EntradaQrCodeService : IEntradaQrCodeService
 {
     public string GeneratePayload(int? idEntrada, string ownerEmail)

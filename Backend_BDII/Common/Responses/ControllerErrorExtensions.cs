@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 
 namespace Backend_BDII.Common.Responses;
-
+//Esta clase permite mostrar los errores de mejor manera, haciendo que no sea tan frustrante tener que buscar en donde está cuando se esté debuggeando el código.
 public static class ControllerErrorExtensions
 {
     public static ObjectResult ApiError(

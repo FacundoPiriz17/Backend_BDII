@@ -4,7 +4,7 @@ using System.Text;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Backend_BDII.Common.Security;
-
+//Esta clase es la encargada de generar los tokens para uso de usuario y mayor seguridad
 public sealed class JwtTokenService : IJwtTokenService
 {
     private readonly IConfiguration _configuration;

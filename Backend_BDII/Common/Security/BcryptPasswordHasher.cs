@@ -1,5 +1,5 @@
 namespace Backend_BDII.Common.Security;
-
+//Esta clase se encarga de hashear las contraseñas para brindarles mayor seguridad
 public class BcryptPasswordHasher : IPasswordHasher
 {
     private const int WorkFactor = 12;
