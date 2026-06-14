@@ -30,7 +30,7 @@
       <Folder Include="Modules\Compras\Controllers\" />
       <Folder Include="Modules\Compras\DTOs\" />
       <Folder Include="Modules\Eventos\Controllers\" />
-      <Folder Include="Modules\Infraestructura\Controllers\" />
+      <Folder Include="Modules\Infraestructura\Models\" />
       <Folder Include="Modules\Reportes\Controllers\" />
       <Folder Include="Modules\Transferencias\Controllers\" />
       <Folder Include="Modules\Validaciones\Controllers\" />
