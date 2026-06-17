@@ -1,4 +1,4 @@
-namespace Backend_BDII.Modules.Compras.Models;
+namespace Backend_BDII.Modules.Compras.DTOs;
 
 public sealed class NuevaEntradaCompra
 {

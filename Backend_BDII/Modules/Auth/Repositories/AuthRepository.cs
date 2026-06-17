@@ -1,6 +1,5 @@
 using Backend_BDII.Common.Database;
 using Backend_BDII.Modules.Auth.DTOs;
-using Backend_BDII.Modules.Auth.Models;
 using Npgsql;
 
 namespace Backend_BDII.Modules.Auth.Repositories;

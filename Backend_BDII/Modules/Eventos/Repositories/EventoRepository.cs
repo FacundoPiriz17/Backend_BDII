@@ -15,35 +15,91 @@ public sealed class EventoRepository : IEventoRepository
         _connectionFactory = connectionFactory;
     }
 
-    public async Task<List<EventoResponse>> GetEventosAsync(
+    public async Task<List<EventoResponse>> GetAllAsync(
+        bool soloFuturos,
+        string? busqueda,
         string? pais,
+        string? equipo,
+        string? fase,
         string? estado,
+        DateOnly? desde,
+        DateOnly? hasta,
         CancellationToken cancellationToken = default)
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
 
-        var sql = new StringBuilder(BaseEventosSql);
+        var sql = new StringBuilder(BaseSelectSql);
         sql.AppendLine();
         sql.AppendLine("WHERE 1 = 1");
+
+        if (soloFuturos)
+        {
+            sql.AppendLine("""
+                AND (
+                    p.fecha > CURRENT_DATE
+                    OR (p.fecha = CURRENT_DATE AND p.hora > LOCALTIME)
+                )
+                """);
+        }
+
+        if (!string.IsNullOrWhiteSpace(busqueda))
+        {
+            sql.AppendLine("""
+                AND (
+                    p.equipo_local ILIKE @busqueda
+                    OR p.equipo_visitante ILIKE @busqueda
+                    OR est.nombre_estadio ILIKE @busqueda
+                    OR est.ciudad ILIKE @busqueda
+                )
+                """);
+        }
 
         if (!string.IsNullOrWhiteSpace(pais))
             sql.AppendLine("AND est.pais::text = @pais");
 
+        if (!string.IsNullOrWhiteSpace(equipo))
+            sql.AppendLine("AND (p.equipo_local = @equipo OR p.equipo_visitante = @equipo)");
+
+        if (!string.IsNullOrWhiteSpace(fase))
+            sql.AppendLine("AND p.fase = CAST(@fase AS fase_enum)");
+
         if (!string.IsNullOrWhiteSpace(estado))
             sql.AppendLine("AND p.estado = CAST(@estado AS estado_partido_enum)");
 
-        sql.AppendLine(GroupBySql);
+        if (desde.HasValue)
+            sql.AppendLine("AND p.fecha >= @desde");
+
+        if (hasta.HasValue)
+            sql.AppendLine("AND p.fecha <= @hasta");
+
+        sql.AppendLine(BaseGroupBySql);
         sql.AppendLine("ORDER BY p.fecha, p.hora, p.id_partido, ps.nombre_sector;");
 
         await using var command = new NpgsqlCommand(sql.ToString(), connection);
 
+        if (!string.IsNullOrWhiteSpace(busqueda))
+            command.Parameters.AddWithValue("busqueda", $"%{busqueda.Trim()}%");
+
         if (!string.IsNullOrWhiteSpace(pais))
             command.Parameters.AddWithValue("pais", PaisSedeNormalizer.Normalize(pais));
 
+        if (!string.IsNullOrWhiteSpace(equipo))
+            command.Parameters.AddWithValue("equipo", NormalizeEquipo(equipo));
+
+        if (!string.IsNullOrWhiteSpace(fase))
+            command.Parameters.AddWithValue("fase", fase.Trim());
+
         if (!string.IsNullOrWhiteSpace(estado))
-            command.Parameters.AddWithValue("estado", estado.Trim());
+            command.Parameters.AddWithValue("estado", estado.Trim().ToLowerInvariant());
+
+        if (desde.HasValue)
+            command.Parameters.AddWithValue("desde", desde.Value);
+
+        if (hasta.HasValue)
+            command.Parameters.AddWithValue("hasta", hasta.Value);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
         return await MapEventosAsync(reader, cancellationToken);
     }
 
@@ -84,7 +140,7 @@ public sealed class EventoRepository : IEventoRepository
                     @costo,
                     CAST(@fase AS fase_enum),
                     @email_admin,
-                    COALESCE(CAST(@fecha_habilitacion AS DATE), CURRENT_DATE)
+                    @fecha_habilitacion
                 )
                 RETURNING id_partido;
                 """;
@@ -96,23 +152,19 @@ public sealed class EventoRepository : IEventoRepository
                 command.Parameters.AddWithValue("fecha", request.Fecha);
                 command.Parameters.AddWithValue("hora", request.Hora);
                 command.Parameters.AddWithValue("id_estadio", request.IdEstadio);
-                command.Parameters.AddWithValue("equipo_visitante", request.EquipoVisitante.Trim().ToUpperInvariant());
-                command.Parameters.AddWithValue("equipo_local", request.EquipoLocal.Trim().ToUpperInvariant());
+                command.Parameters.AddWithValue("equipo_visitante", NormalizeEquipo(request.EquipoVisitante));
+                command.Parameters.AddWithValue("equipo_local", NormalizeEquipo(request.EquipoLocal));
                 command.Parameters.AddWithValue("costo", request.Costo);
                 command.Parameters.AddWithValue("fase", request.Fase.Trim());
                 command.Parameters.AddWithValue("email_admin", emailAdmin);
-                command.Parameters.AddWithValue("fecha_habilitacion", (object?)request.FechaHabilitacion ?? DBNull.Value);
+                command.Parameters.AddWithValue(
+                    "fecha_habilitacion",
+                    request.FechaHabilitacion ?? DateOnly.FromDateTime(DateTime.Today));
 
                 idPartido = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken));
             }
 
-            await InsertarSectoresHabilitadosAsync(
-                connection,
-                transaction,
-                idPartido,
-                request.IdEstadio,
-                request.SectoresHabilitados,
-                cancellationToken);
+            await ReemplazarSectoresAsync(connection, transaction, idPartido, request.SectoresHabilitados, cancellationToken);
 
             var evento = await GetByIdUsingConnectionAsync(connection, idPartido, transaction, cancellationToken)
                          ?? throw new InvalidOperationException("El evento fue creado, pero no se pudo recuperar.");
@@ -138,22 +190,10 @@ public sealed class EventoRepository : IEventoRepository
 
         try
         {
-            // partido_sector referencia partido(id_partido, id_estadio); si cambia el estadio
-            // hay que borrar primero los sectores habilitados para no violar la FK.
-            const string deleteSectoresSql = """
-                DELETE FROM partido_sector
-                WHERE id_partido = @id_partido;
-                """;
-
-            await using (var command = new NpgsqlCommand(deleteSectoresSql, connection, transaction))
-            {
-                command.Parameters.AddWithValue("id_partido", idPartido);
-                await command.ExecuteNonQueryAsync(cancellationToken);
-            }
-
             const string updateSql = """
                 UPDATE partido
-                SET fecha = @fecha,
+                SET
+                    fecha = @fecha,
                     hora = @hora,
                     id_estadio = @id_estadio,
                     equipo_visitante = @equipo_visitante,
@@ -165,11 +205,10 @@ public sealed class EventoRepository : IEventoRepository
                     estado = CAST(@estado AS estado_partido_enum),
                     email_admin = @email_admin,
                     fecha_habilitacion = @fecha_habilitacion
-                WHERE id_partido = @id_partido
-                RETURNING id_partido;
+                WHERE id_partido = @id_partido;
                 """;
 
-            int? idActualizado;
+            int affectedRows;
 
             await using (var command = new NpgsqlCommand(updateSql, connection, transaction))
             {
@@ -177,33 +216,26 @@ public sealed class EventoRepository : IEventoRepository
                 command.Parameters.AddWithValue("fecha", request.Fecha);
                 command.Parameters.AddWithValue("hora", request.Hora);
                 command.Parameters.AddWithValue("id_estadio", request.IdEstadio);
-                command.Parameters.AddWithValue("equipo_visitante", request.EquipoVisitante.Trim().ToUpperInvariant());
-                command.Parameters.AddWithValue("equipo_local", request.EquipoLocal.Trim().ToUpperInvariant());
+                command.Parameters.AddWithValue("equipo_visitante", NormalizeEquipo(request.EquipoVisitante));
+                command.Parameters.AddWithValue("equipo_local", NormalizeEquipo(request.EquipoLocal));
                 command.Parameters.AddWithValue("marcador_local", request.MarcadorLocal);
                 command.Parameters.AddWithValue("marcador_visitante", request.MarcadorVisitante);
                 command.Parameters.AddWithValue("costo", request.Costo);
                 command.Parameters.AddWithValue("fase", request.Fase.Trim());
-                command.Parameters.AddWithValue("estado", request.Estado.Trim());
+                command.Parameters.AddWithValue("estado", request.Estado.Trim().ToLowerInvariant());
                 command.Parameters.AddWithValue("email_admin", emailAdmin);
                 command.Parameters.AddWithValue("fecha_habilitacion", request.FechaHabilitacion);
 
-                var result = await command.ExecuteScalarAsync(cancellationToken);
-                idActualizado = result is null ? null : Convert.ToInt32(result);
+                affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);
             }
 
-            if (idActualizado is null)
+            if (affectedRows == 0)
             {
                 await transaction.RollbackAsync(cancellationToken);
                 return null;
             }
 
-            await InsertarSectoresHabilitadosAsync(
-                connection,
-                transaction,
-                idPartido,
-                request.IdEstadio,
-                request.SectoresHabilitados,
-                cancellationToken);
+            await ReemplazarSectoresAsync(connection, transaction, idPartido, request.SectoresHabilitados, cancellationToken);
 
             var evento = await GetByIdUsingConnectionAsync(connection, idPartido, transaction, cancellationToken);
 
@@ -220,71 +252,56 @@ public sealed class EventoRepository : IEventoRepository
     public async Task<EventoResponse?> CambiarEstadoAsync(
         int idPartido,
         string emailAdmin,
-        string nuevoEstado,
+        string estado,
         CancellationToken cancellationToken = default)
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
-        try
-        {
-            var paisPartido = await GetPaisEstadioPartidoAsync(connection, transaction, idPartido, cancellationToken);
+        const string sql = """
+            UPDATE partido
+            SET estado = CAST(@estado AS estado_partido_enum),
+                email_admin = @email_admin
+            WHERE id_partido = @id_partido;
+            """;
 
-            if (paisPartido is null)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                return null;
-            }
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("id_partido", idPartido);
+        command.Parameters.AddWithValue("email_admin", emailAdmin);
+        command.Parameters.AddWithValue("estado", estado);
 
-            await ValidarPaisAdminAsync(connection, transaction, emailAdmin, paisPartido, cancellationToken);
+        var affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);
 
-            const string updateSql = """
-                UPDATE partido
-                SET estado = CAST(@estado AS estado_partido_enum)
-                WHERE id_partido = @id_partido
-                RETURNING id_partido;
-                """;
+        if (affectedRows == 0)
+            return null;
 
-            int? idActualizado;
-
-            await using (var command = new NpgsqlCommand(updateSql, connection, transaction))
-            {
-                command.Parameters.AddWithValue("id_partido", idPartido);
-                command.Parameters.AddWithValue("estado", nuevoEstado.Trim());
-
-                var result = await command.ExecuteScalarAsync(cancellationToken);
-                idActualizado = result is null ? null : Convert.ToInt32(result);
-            }
-
-            if (idActualizado is null)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                return null;
-            }
-
-            var evento = await GetByIdUsingConnectionAsync(connection, idPartido, transaction, cancellationToken);
-
-            await transaction.CommitAsync(cancellationToken);
-            return evento;
-        }
-        catch
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            throw;
-        }
+        return await GetByIdUsingConnectionAsync(connection, idPartido, null, cancellationToken);
     }
 
-    private static async Task InsertarSectoresHabilitadosAsync(
+    private static async Task ReemplazarSectoresAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         int idPartido,
-        int idEstadio,
         IEnumerable<string> sectores,
         CancellationToken cancellationToken)
     {
+        const string deleteSql = """
+            DELETE FROM partido_sector
+            WHERE id_partido = @id_partido;
+            """;
+
+        await using (var command = new NpgsqlCommand(deleteSql, connection, transaction))
+        {
+            command.Parameters.AddWithValue("id_partido", idPartido);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
         const string insertSql = """
             INSERT INTO partido_sector (id_partido, nombre_sector, id_estadio)
-            VALUES (@id_partido, CAST(@nombre_sector AS sector_enum), @id_estadio);
+            SELECT p.id_partido, CAST(@nombre_sector AS sector_enum), p.id_estadio
+            FROM partido p
+            INNER JOIN sector s ON s.id_estadio = p.id_estadio
+                AND s.nombre_sector = CAST(@nombre_sector AS sector_enum)
+            WHERE p.id_partido = @id_partido;
             """;
 
         foreach (var sector in sectores.Select(s => s.Trim().ToUpperInvariant()).Distinct())
@@ -292,8 +309,6 @@ public sealed class EventoRepository : IEventoRepository
             await using var command = new NpgsqlCommand(insertSql, connection, transaction);
             command.Parameters.AddWithValue("id_partido", idPartido);
             command.Parameters.AddWithValue("nombre_sector", sector);
-            command.Parameters.AddWithValue("id_estadio", idEstadio);
-
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
     }
@@ -304,7 +319,11 @@ public sealed class EventoRepository : IEventoRepository
         NpgsqlTransaction? transaction,
         CancellationToken cancellationToken)
     {
-        var sql = BaseEventosSql + "\n" + "WHERE p.id_partido = @id_partido\n" + GroupBySql + "\nORDER BY ps.nombre_sector;";
+        var sql = BaseSelectSql + "\n" + """
+            WHERE p.id_partido = @id_partido
+            """ + "\n" + BaseGroupBySql + "\n" + """
+            ORDER BY ps.nombre_sector;
+            """;
 
         await using var command = new NpgsqlCommand(sql, connection, transaction);
         command.Parameters.AddWithValue("id_partido", idPartido);
@@ -315,55 +334,11 @@ public sealed class EventoRepository : IEventoRepository
         return eventos.FirstOrDefault();
     }
 
-    private static async Task ValidarPaisAdminAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        string emailAdmin,
-        string paisEsperado,
-        CancellationToken cancellationToken)
-    {
-        const string sql = """
-            SELECT pais::text
-            FROM admin
-            WHERE LOWER(email_admin) = LOWER(@email_admin);
-            """;
-
-        await using var command = new NpgsqlCommand(sql, connection, transaction);
-        command.Parameters.AddWithValue("email_admin", emailAdmin);
-
-        var paisAdmin = await command.ExecuteScalarAsync(cancellationToken) as string;
-
-        if (paisAdmin is null)
-            throw new InvalidOperationException("El administrador no existe.");
-
-        if (!string.Equals(paisAdmin, paisEsperado, StringComparison.Ordinal))
-            throw new InvalidOperationException("El administrador solo puede gestionar eventos de su pais sede.");
-    }
-
-    private static async Task<string?> GetPaisEstadioPartidoAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        int idPartido,
-        CancellationToken cancellationToken)
-    {
-        const string sql = """
-            SELECT est.pais::text
-            FROM partido p
-            INNER JOIN estadio est ON est.id_estadio = p.id_estadio
-            WHERE p.id_partido = @id_partido;
-            """;
-
-        await using var command = new NpgsqlCommand(sql, connection, transaction);
-        command.Parameters.AddWithValue("id_partido", idPartido);
-
-        return await command.ExecuteScalarAsync(cancellationToken) as string;
-    }
-
-    private const string BaseEventosSql = """
+    private const string BaseSelectSql = """
         SELECT
             p.id_partido,
-            p.fecha,
-            p.hora,
+            p.fecha AS fecha_partido,
+            p.hora AS hora_partido,
             p.equipo_local,
             p.equipo_visitante,
             p.marcador_local,
@@ -382,17 +357,17 @@ public sealed class EventoRepository : IEventoRepository
             ps.nombre_sector::text AS nombre_sector,
             COALESCE(s.capacidad, 0) AS capacidad_sector,
             COALESCE(s.costo, 0) AS costo_sector,
-            COUNT(e.id_entrada) FILTER (WHERE e.estado <> 'cancelada')::int AS entradas_vendidas
+            COUNT(e.id_entrada)::int AS entradas_vendidas
         FROM partido p
         INNER JOIN estadio est ON est.id_estadio = p.id_estadio
         LEFT JOIN partido_sector ps ON ps.id_partido = p.id_partido AND ps.id_estadio = p.id_estadio
-        LEFT JOIN sector s ON s.nombre_sector = ps.nombre_sector AND s.id_estadio = ps.id_estadio
+        LEFT JOIN sector s ON s.id_estadio = ps.id_estadio AND s.nombre_sector = ps.nombre_sector
         LEFT JOIN entrada e ON e.id_partido = p.id_partido
             AND e.id_estadio = ps.id_estadio
             AND e.nombre_sector = ps.nombre_sector
         """;
 
-    private const string GroupBySql = """
+    private const string BaseGroupBySql = """
         GROUP BY
             p.id_partido,
             p.fecha,
@@ -432,8 +407,8 @@ public sealed class EventoRepository : IEventoRepository
                 evento = new EventoResponse
                 {
                     IdPartido = idPartido,
-                    Fecha = reader.GetFieldValue<DateOnly>(reader.GetOrdinal("fecha")),
-                    Hora = reader.GetFieldValue<TimeOnly>(reader.GetOrdinal("hora")),
+                    Fecha = reader.GetFieldValue<DateOnly>(reader.GetOrdinal("fecha_partido")),
+                    Hora = reader.GetFieldValue<TimeOnly>(reader.GetOrdinal("hora_partido")),
                     EquipoLocal = reader.GetString(reader.GetOrdinal("equipo_local")),
                     EquipoVisitante = reader.GetString(reader.GetOrdinal("equipo_visitante")),
                     MarcadorLocal = reader.GetInt32(reader.GetOrdinal("marcador_local")),
@@ -468,7 +443,7 @@ public sealed class EventoRepository : IEventoRepository
                 continue;
 
             var capacidad = reader.GetInt32(reader.GetOrdinal("capacidad_sector"));
-            var entradasVendidas = reader.GetInt32(reader.GetOrdinal("entradas_vendidas"));
+            var vendidas = reader.GetInt32(reader.GetOrdinal("entradas_vendidas"));
             var costoSector = reader.GetInt32(reader.GetOrdinal("costo_sector"));
 
             evento.Sectores.Add(new SectorEventoResponse
@@ -477,11 +452,16 @@ public sealed class EventoRepository : IEventoRepository
                 Capacidad = capacidad,
                 CostoSector = costoSector,
                 CostoTotalEntrada = evento.CostoBase + costoSector,
-                EntradasVendidas = entradasVendidas,
-                EntradasDisponibles = Math.Max(0, capacidad - entradasVendidas)
+                EntradasVendidas = vendidas,
+                EntradasDisponibles = Math.Max(0, capacidad - vendidas)
             });
         }
 
         return eventos.Values.ToList();
+    }
+
+    private static string NormalizeEquipo(string codigoFifa)
+    {
+        return codigoFifa.Trim().ToUpperInvariant();
     }
 }

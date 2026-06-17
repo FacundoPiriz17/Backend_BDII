@@ -1,7 +1,6 @@
 using System.Text;
 using Backend_BDII.Common.Database;
 using Backend_BDII.Modules.Compras.DTOs;
-using Backend_BDII.Modules.Compras.Models;
 using Npgsql;
 
 namespace Backend_BDII.Modules.Compras.Repositories;

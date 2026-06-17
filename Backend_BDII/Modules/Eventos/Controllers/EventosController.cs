@@ -16,23 +16,27 @@ public sealed class EventosController : ControllerBase
     private readonly IEventoService _eventoService;
     private readonly ILogger<EventosController> _logger;
 
-    public EventosController(
-        IEventoService eventoService,
-        ILogger<EventosController> logger)
+    public EventosController(IEventoService eventoService, ILogger<EventosController> logger)
     {
         _eventoService = eventoService;
         _logger = logger;
     }
 
     [HttpGet]
-    public async Task<ActionResult<List<EventoResponse>>> GetEventos(
-        [FromQuery] string? pais,
-        [FromQuery] string? estado,
-        CancellationToken cancellationToken)
+    public async Task<ActionResult<List<EventoResponse>>> GetAll(
+        [FromQuery] bool soloFuturos = false,
+        [FromQuery] string? busqueda = null,
+        [FromQuery] string? pais = null,
+        [FromQuery] string? equipo = null,
+        [FromQuery] string? fase = null,
+        [FromQuery] string? estado = null,
+        [FromQuery] DateOnly? desde = null,
+        [FromQuery] DateOnly? hasta = null,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            var eventos = await _eventoService.GetEventosAsync(pais, estado, cancellationToken);
+            var eventos = await _eventoService.GetAllAsync(soloFuturos, busqueda, pais, equipo, fase, estado, desde, hasta, cancellationToken);
             return Ok(eventos);
         }
         catch (InvalidOperationException ex)
@@ -42,7 +46,7 @@ public sealed class EventosController : ControllerBase
     }
 
     [HttpGet("{idPartido:int}")]
-    public async Task<ActionResult<EventoResponse>> GetEventoById(int idPartido, CancellationToken cancellationToken)
+    public async Task<ActionResult<EventoResponse>> GetById(int idPartido, CancellationToken cancellationToken)
     {
         var evento = await _eventoService.GetByIdAsync(idPartido, cancellationToken);
 
@@ -54,9 +58,7 @@ public sealed class EventosController : ControllerBase
 
     [HttpPost]
     [Authorize(Roles = "Admin")]
-    public async Task<ActionResult<EventoResponse>> CrearEvento(
-        [FromBody] CrearEventoRequest request,
-        CancellationToken cancellationToken)
+    public async Task<ActionResult<EventoResponse>> Crear([FromBody] CrearEventoRequest request, CancellationToken cancellationToken)
     {
         var email = GetEmailFromToken();
 
@@ -66,7 +68,7 @@ public sealed class EventosController : ControllerBase
         try
         {
             var evento = await _eventoService.CrearAsync(email, request, cancellationToken);
-            return CreatedAtAction(nameof(GetEventoById), new { idPartido = evento.IdPartido }, evento);
+            return CreatedAtAction(nameof(GetById), new { idPartido = evento.IdPartido }, evento);
         }
         catch (InvalidOperationException ex)
         {
@@ -81,7 +83,7 @@ public sealed class EventosController : ControllerBase
 
     [HttpPut("{idPartido:int}")]
     [Authorize(Roles = "Admin")]
-    public async Task<ActionResult<EventoResponse>> ActualizarEvento(
+    public async Task<ActionResult<EventoResponse>> Actualizar(
         int idPartido,
         [FromBody] ActualizarEventoRequest request,
         CancellationToken cancellationToken)
@@ -125,7 +127,7 @@ public sealed class EventosController : ControllerBase
 
         try
         {
-            var evento = await _eventoService.CambiarEstadoAsync(idPartido, email, request.Estado, cancellationToken);
+            var evento = await _eventoService.CambiarEstadoAsync(idPartido, email, request, cancellationToken);
             return Ok(evento);
         }
         catch (KeyNotFoundException ex)
@@ -138,7 +140,7 @@ public sealed class EventosController : ControllerBase
         }
         catch (PostgresException ex)
         {
-            _logger.LogWarning(ex, "Error de PostgreSQL al cambiar el estado del evento.");
+            _logger.LogWarning(ex, "Error de PostgreSQL al cambiar estado de evento.");
             return this.BadRequestError(ex.MessageText, "database_error");
         }
     }

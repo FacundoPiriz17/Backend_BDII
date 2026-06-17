@@ -1,3 +1,4 @@
+using Backend_BDII.Common.Auditing;
 using Backend_BDII.Common.Security;
 using Backend_BDII.Modules.Auth.DTOs;
 using Backend_BDII.Modules.Auth.Repositories;
@@ -9,15 +10,18 @@ public class AuthService : IAuthService
     private readonly IAuthRepository _authRepository;
     private readonly IJwtTokenService _jwtTokenService;
     private readonly IPasswordHasher _passwordHasher;
+    private readonly IAuditService _auditService;
 
     public AuthService(
         IAuthRepository authRepository,
         IJwtTokenService jwtTokenService,
-        IPasswordHasher passwordHasher)
+        IPasswordHasher passwordHasher,
+        IAuditService auditService)
     {
         _authRepository = authRepository;
         _jwtTokenService = jwtTokenService;
         _passwordHasher = passwordHasher;
+        _auditService = auditService;
     }
     
     public async Task RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
@@ -55,6 +59,8 @@ public class AuthService : IAuthService
             passwordHash,
             cancellationToken
         );
+
+        _auditService.Record("auth.register", email, new { Rol = "General" });
     }
 
     public async Task<AuthResponse> LoginAsync(LoginRequest request, CancellationToken cancellationToken = default)
@@ -80,6 +86,40 @@ public class AuthService : IAuthService
             Nombre = user.Nombre,
             Roles = roles
         });
+
+        _auditService.Record("auth.login", user.Email, new { Roles = roles });
+
+        return new AuthResponse
+        {
+            Token = token,
+            Email = user.Email,
+            Nombre = user.Nombre,
+            Roles = roles
+        };
+    }
+
+    /// <summary>
+    /// Emite un JWT nuevo para un usuario ya autenticado (renovación de sesión).
+    /// Se vuelve a leer el usuario para reflejar cambios de rol / habilitación.
+    /// </summary>
+    public async Task<AuthResponse> RefreshAsync(string email, CancellationToken cancellationToken = default)
+    {
+        var user = await _authRepository.GetByEmailAsync(email, cancellationToken)
+            ?? throw new UnauthorizedAccessException("La sesión ya no es válida.");
+
+        if (!user.Habilitado)
+            throw new UnauthorizedAccessException("El usuario está deshabilitado.");
+
+        var roles = user.GetRoles();
+
+        var token = _jwtTokenService.GenerateToken(new JwtUser
+        {
+            Email = user.Email,
+            Nombre = user.Nombre,
+            Roles = roles
+        });
+
+        _auditService.Record("auth.refresh", user.Email, new { Roles = roles });
 
         return new AuthResponse
         {

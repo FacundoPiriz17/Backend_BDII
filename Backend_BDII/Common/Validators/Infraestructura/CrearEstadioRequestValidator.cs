@@ -13,9 +13,13 @@ public sealed class CrearEstadioRequestValidator : AbstractValidator<CrearEstadi
             .MaximumLength(32).WithMessage("El nombre del estadio no puede superar los 32 caracteres.");
 
         RuleFor(x => x.Capacidad)
-            .GreaterThan(0).WithMessage("La capacidad debe ser mayor a 0.");
+            .GreaterThan(0).WithMessage("La capacidad debe ser mayor a 0.")
+            .When(x => x.Capacidad.HasValue);
 
         RuleFor(x => x.Pais)
-            .NotEmpty().WithMessage("El país es obligatorio.");
+            .NotEmpty().WithMessage("El pais es obligatorio.");
+
+        RuleFor(x => x.Sectores)
+            .NotEmpty().WithMessage("Debe crear al menos un sector.");
     }
 }
