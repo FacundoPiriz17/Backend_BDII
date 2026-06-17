@@ -1,7 +1,6 @@
 using Backend_BDII.Common.Security;
 using Backend_BDII.Common.Auditing;
 using Backend_BDII.Modules.Compras.DTOs;
-using Backend_BDII.Modules.Compras.Models;
 using Backend_BDII.Modules.Compras.Repositories;
 
 namespace Backend_BDII.Modules.Compras.Services;

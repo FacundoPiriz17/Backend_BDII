@@ -6,6 +6,7 @@ using Npgsql;
 using System.Security.Claims;
 using Backend_BDII.Modules.Usuarios.Services;
 using Backend_BDII.Modules.Usuarios.DTOs;
+using Backend_BDII.Common.Responses;
 namespace Backend_BDII.Modules.Auth.Controllers;
 
 [ApiController]
@@ -41,19 +42,13 @@ public sealed class AuthController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new
-            {
-                error = ex.Message
-            });
+            return this.BadRequestError(ex.Message);
         }
         catch (PostgresException ex)
         {
             _logger.LogWarning(ex, "Error de PostgreSQL al registrar usuario.");
 
-            return BadRequest(new
-            {
-                error = ex.MessageText
-            });
+            return this.BadRequestError(ex.MessageText, "database_error");
         }
     }
 
@@ -68,13 +63,32 @@ public sealed class AuthController : ControllerBase
         }
         catch (UnauthorizedAccessException ex)
         {
-            return Unauthorized(new
-            {
-                error = ex.Message
-            });
+            return this.UnauthorizedError(ex.Message);
         }
     }
     
+    [HttpPost("refresh")]
+    [Authorize]
+    [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<AuthResponse>> Refresh(CancellationToken cancellationToken)
+    {
+        var email = User.FindFirstValue(ClaimTypes.Email);
+
+        if (string.IsNullOrWhiteSpace(email))
+            return this.UnauthorizedError("No se pudo obtener el email del token.");
+
+        try
+        {
+            var response = await _authService.RefreshAsync(email, cancellationToken);
+            return Ok(response);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return this.UnauthorizedError(ex.Message);
+        }
+    }
+
     [HttpGet("me")]
     [Authorize]
     [ProducesResponseType(typeof(MiPerfilResponse), StatusCodes.Status200OK)]
@@ -85,12 +99,12 @@ public sealed class AuthController : ControllerBase
         var email = User.FindFirstValue(ClaimTypes.Email);
 
         if (string.IsNullOrWhiteSpace(email))
-            return Unauthorized(new { error = "No se pudo obtener el email del token." });
+            return this.UnauthorizedError("No se pudo obtener el email del token.");
 
         var perfil = await _usuarioService.GetMiPerfilAsync(email, cancellationToken);
 
         if (perfil is null)
-            return NotFound(new { error = "Usuario no encontrado." });
+            return this.NotFoundError("Usuario no encontrado.");
 
         return Ok(perfil);
     }

@@ -10,10 +10,3 @@ public sealed class EstadioResponse
     public required string Pais { get; init; }
     public required List<SectorInfraestructuraResponse> Sectores { get; init; }
 }
-
-public sealed class SectorInfraestructuraResponse
-{
-    public required string NombreSector { get; init; }
-    public int? Capacidad { get; init; }
-    public int? Costo { get; init; }
-}

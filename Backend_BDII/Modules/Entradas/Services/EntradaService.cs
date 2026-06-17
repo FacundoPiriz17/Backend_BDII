@@ -1,4 +1,4 @@
-﻿using Backend_BDII.Modules.Entradas.DTOs;
+using Backend_BDII.Modules.Entradas.DTOs;
 using Backend_BDII.Modules.Entradas.Repositories;
 
 namespace Backend_BDII.Modules.Entradas.Services;
@@ -12,48 +12,22 @@ public sealed class EntradaService : IEntradaService
         _entradaRepository = entradaRepository;
     }
 
-    public Task<List<EntradasResponse>> GetMisEntradasAsync(
-        string emailUsuario,
-        CancellationToken cancellationToken = default)
-    {
-        return _entradaRepository.GetByUsuarioAsync(
-            NormalizeEmail(emailUsuario),
-            cancellationToken);
-    }
-
-    public async Task<EntradasResponse?> GetByIdAsync(
+    public Task<EntradaDetalleResponse?> GetByIdAsync(
         int idEntrada,
         string emailUsuario,
+        bool puedeVerTodas,
         CancellationToken cancellationToken = default)
     {
-        return await _entradaRepository.GetByIdAsync(
-            idEntrada,
-            cancellationToken);
+        return _entradaRepository.GetByIdAsync(idEntrada, NormalizeEmail(emailUsuario), puedeVerTodas, cancellationToken);
     }
 
-    public async Task<EntradasResponse> ActualizarEstadoAsync(
-        int idEntrada,
-        string nuevoEstado,
-        CancellationToken cancellationToken = default)
-    {
-
-        return await _entradaRepository.ActualizarEstadoAsync(
-                   idEntrada,
-                   nuevoEstado,
-                   cancellationToken)
-               ?? throw new KeyNotFoundException("Entrada no encontrada.");
-    }
-
- 
-    private async Task<EntradasResponse> GetEntradaExistenteAsync(
+    public Task<CustodiaEntradaResponse?> GetCustodiaAsync(
         int idEntrada,
         string emailUsuario,
-        CancellationToken cancellationToken)
+        bool puedeVerTodas,
+        CancellationToken cancellationToken = default)
     {
-        return await _entradaRepository.GetByIdAsync(
-                   idEntrada,
-                   cancellationToken)
-               ?? throw new KeyNotFoundException("Entrada no encontrada.");
+        return _entradaRepository.GetCustodiaAsync(idEntrada, NormalizeEmail(emailUsuario), puedeVerTodas, cancellationToken);
     }
 
     private static string NormalizeEmail(string email)

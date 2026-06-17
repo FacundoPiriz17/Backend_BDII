@@ -19,18 +19,17 @@ public sealed class ReportesController : ControllerBase
 
     [HttpGet("eventos-mas-vendidos")]
     public async Task<ActionResult<List<EventoMasVendidoResponse>>> GetEventosMasVendidos(
-        [FromQuery] string? pais,
-        [FromQuery] int? limit,
-        CancellationToken cancellationToken)
+        [FromQuery] int limit = 10,
+        CancellationToken cancellationToken = default)
     {
-        var reporte = await _reporteService.GetEventosMasVendidosAsync(pais, limit, cancellationToken);
+        var reporte = await _reporteService.GetEventosMasVendidosAsync(limit, cancellationToken);
         return Ok(reporte);
     }
 
     [HttpGet("mayores-compradores")]
     public async Task<ActionResult<List<MayorCompradorResponse>>> GetMayoresCompradores(
-        [FromQuery] int? limit,
-        CancellationToken cancellationToken)
+        [FromQuery] int limit = 10,
+        CancellationToken cancellationToken = default)
     {
         var reporte = await _reporteService.GetMayoresCompradoresAsync(limit, cancellationToken);
         return Ok(reporte);
@@ -38,10 +37,10 @@ public sealed class ReportesController : ControllerBase
 
     [HttpGet("ocupacion-eventos")]
     public async Task<ActionResult<List<OcupacionEventoResponse>>> GetOcupacionEventos(
-        [FromQuery] string? pais,
-        CancellationToken cancellationToken)
+        [FromQuery] int limit = 50,
+        CancellationToken cancellationToken = default)
     {
-        var reporte = await _reporteService.GetOcupacionEventosAsync(pais, cancellationToken);
+        var reporte = await _reporteService.GetOcupacionEventosAsync(limit, cancellationToken);
         return Ok(reporte);
     }
 

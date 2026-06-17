@@ -1,6 +1,4 @@
-using System.Text;
 using Backend_BDII.Common.Database;
-using Backend_BDII.Common.Domain;
 using Backend_BDII.Modules.Reportes.DTOs;
 using Npgsql;
 
@@ -16,36 +14,26 @@ public sealed class ReporteRepository : IReporteRepository
     }
 
     public async Task<List<EventoMasVendidoResponse>> GetEventosMasVendidosAsync(
-        string? pais,
         int limit,
         CancellationToken cancellationToken = default)
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
 
-        var sql = new StringBuilder("""
+        const string sql = """
             SELECT
                 p.id_partido,
-                p.fecha,
-                p.hora,
+                p.fecha AS fecha_partido,
+                p.hora AS hora_partido,
                 p.equipo_local,
                 p.equipo_visitante,
                 est.nombre_estadio,
                 est.pais::text AS pais_estadio,
-                COUNT(e.id_entrada)::int AS entradas_vendidas,
-                COALESCE(SUM(e.costo_total), 0)::int AS monto_vendido
+                (COUNT(e.id_entrada) FILTER (WHERE c.estado = 'paga'))::int AS entradas_vendidas,
+                COALESCE(SUM(e.costo_total) FILTER (WHERE c.estado = 'paga'), 0)::int AS monto_vendido
             FROM partido p
             INNER JOIN estadio est ON est.id_estadio = p.id_estadio
-            INNER JOIN entrada e ON e.id_partido = p.id_partido
-            INNER JOIN compra c ON c.id_compra = e.id_compra
-            WHERE c.estado = 'paga'
-              AND e.estado <> 'cancelada'
-            """);
-        sql.AppendLine();
-
-        if (!string.IsNullOrWhiteSpace(pais))
-            sql.AppendLine("AND est.pais::text = @pais");
-
-        sql.AppendLine("""
+            LEFT JOIN entrada e ON e.id_partido = p.id_partido
+            LEFT JOIN compra c ON c.id_compra = e.id_compra
             GROUP BY
                 p.id_partido,
                 p.fecha,
@@ -54,27 +42,23 @@ public sealed class ReporteRepository : IReporteRepository
                 p.equipo_visitante,
                 est.nombre_estadio,
                 est.pais
-            ORDER BY entradas_vendidas DESC, monto_vendido DESC
+            ORDER BY entradas_vendidas DESC, monto_vendido DESC, p.fecha
             LIMIT @limit;
-            """);
+            """;
 
-        await using var command = new NpgsqlCommand(sql.ToString(), connection);
+        await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("limit", limit);
 
-        if (!string.IsNullOrWhiteSpace(pais))
-            command.Parameters.AddWithValue("pais", PaisSedeNormalizer.Normalize(pais));
-
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-
-        var eventos = new List<EventoMasVendidoResponse>();
+        var reportes = new List<EventoMasVendidoResponse>();
 
         while (await reader.ReadAsync(cancellationToken))
         {
-            eventos.Add(new EventoMasVendidoResponse
+            reportes.Add(new EventoMasVendidoResponse
             {
                 IdPartido = reader.GetInt32(reader.GetOrdinal("id_partido")),
-                Fecha = reader.GetFieldValue<DateOnly>(reader.GetOrdinal("fecha")),
-                Hora = reader.GetFieldValue<TimeOnly>(reader.GetOrdinal("hora")),
+                Fecha = reader.GetFieldValue<DateOnly>(reader.GetOrdinal("fecha_partido")),
+                Hora = reader.GetFieldValue<TimeOnly>(reader.GetOrdinal("hora_partido")),
                 EquipoLocal = reader.GetString(reader.GetOrdinal("equipo_local")),
                 EquipoVisitante = reader.GetString(reader.GetOrdinal("equipo_visitante")),
                 Estadio = reader.GetString(reader.GetOrdinal("nombre_estadio")),
@@ -84,7 +68,7 @@ public sealed class ReporteRepository : IReporteRepository
             });
         }
 
-        return eventos;
+        return reportes;
     }
 
     public async Task<List<MayorCompradorResponse>> GetMayoresCompradoresAsync(
@@ -95,21 +79,21 @@ public sealed class ReporteRepository : IReporteRepository
 
         const string sql = """
             SELECT
-                u.email,
+                c.email_usuario,
                 u.nombre,
                 COUNT(c.id_compra)::int AS compras_pagas,
-                COALESCE(SUM(ent.cantidad), 0)::int AS entradas_compradas,
+                COALESCE(SUM(ec.entradas), 0)::int AS entradas_compradas,
                 COALESCE(SUM(c.monto_total), 0)::int AS monto_total_pagado
-            FROM usuario u
-            INNER JOIN compra c ON c.email_usuario = u.email AND c.estado = 'paga'
+            FROM compra c
+            INNER JOIN usuario u ON u.email = c.email_usuario
             LEFT JOIN (
-                SELECT id_compra, COUNT(*)::int AS cantidad
+                SELECT id_compra, COUNT(*)::int AS entradas
                 FROM entrada
-                WHERE estado <> 'cancelada'
                 GROUP BY id_compra
-            ) ent ON ent.id_compra = c.id_compra
-            GROUP BY u.email, u.nombre
-            ORDER BY monto_total_pagado DESC, entradas_compradas DESC
+            ) ec ON ec.id_compra = c.id_compra
+            WHERE c.estado = 'paga'
+            GROUP BY c.email_usuario, u.nombre
+            ORDER BY entradas_compradas DESC, monto_total_pagado DESC, c.email_usuario
             LIMIT @limit;
             """;
 
@@ -117,14 +101,13 @@ public sealed class ReporteRepository : IReporteRepository
         command.Parameters.AddWithValue("limit", limit);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-
-        var compradores = new List<MayorCompradorResponse>();
+        var reportes = new List<MayorCompradorResponse>();
 
         while (await reader.ReadAsync(cancellationToken))
         {
-            compradores.Add(new MayorCompradorResponse
+            reportes.Add(new MayorCompradorResponse
             {
-                EmailUsuario = reader.GetString(reader.GetOrdinal("email")),
+                EmailUsuario = reader.GetString(reader.GetOrdinal("email_usuario")),
                 NombreUsuario = reader.GetString(reader.GetOrdinal("nombre")),
                 ComprasPagas = reader.GetInt32(reader.GetOrdinal("compras_pagas")),
                 EntradasCompradas = reader.GetInt32(reader.GetOrdinal("entradas_compradas")),
@@ -132,93 +115,83 @@ public sealed class ReporteRepository : IReporteRepository
             });
         }
 
-        return compradores;
+        return reportes;
     }
 
     public async Task<List<OcupacionEventoResponse>> GetOcupacionEventosAsync(
-        string? pais,
+        int limit,
         CancellationToken cancellationToken = default)
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
 
-        var sql = new StringBuilder("""
+        const string sql = """
+            WITH capacidad_evento AS (
+                SELECT
+                    ps.id_partido,
+                    SUM(COALESCE(s.capacidad, 0))::int AS capacidad_habilitada
+                FROM partido_sector ps
+                INNER JOIN sector s ON s.id_estadio = ps.id_estadio
+                    AND s.nombre_sector = ps.nombre_sector
+                GROUP BY ps.id_partido
+            ),
+            ventas_evento AS (
+                SELECT
+                    e.id_partido,
+                    COUNT(*)::int AS entradas_vendidas
+                FROM entrada e
+                INNER JOIN compra c ON c.id_compra = e.id_compra
+                WHERE c.estado = 'paga'
+                GROUP BY e.id_partido
+            )
             SELECT
                 p.id_partido,
-                p.fecha,
-                p.hora,
+                p.fecha AS fecha_partido,
+                p.hora AS hora_partido,
                 p.equipo_local,
                 p.equipo_visitante,
                 est.id_estadio,
                 est.nombre_estadio,
-                est.ciudad,
+                COALESCE(est.ciudad, '') AS ciudad,
                 est.pais::text AS pais_estadio,
-                COALESCE(cap.capacidad_habilitada, 0)::int AS capacidad_habilitada,
-                COALESCE(vend.entradas_vendidas, 0)::int AS entradas_vendidas
+                COALESCE(cap.capacidad_habilitada, 0) AS capacidad_habilitada,
+                COALESCE(ven.entradas_vendidas, 0) AS entradas_vendidas
             FROM partido p
             INNER JOIN estadio est ON est.id_estadio = p.id_estadio
-            LEFT JOIN (
-                SELECT ps.id_partido, SUM(s.capacidad)::int AS capacidad_habilitada
-                FROM partido_sector ps
-                INNER JOIN sector s ON s.nombre_sector = ps.nombre_sector AND s.id_estadio = ps.id_estadio
-                GROUP BY ps.id_partido
-            ) cap ON cap.id_partido = p.id_partido
-            LEFT JOIN (
-                SELECT id_partido, COUNT(*)::int AS entradas_vendidas
-                FROM entrada
-                WHERE estado <> 'cancelada'
-                GROUP BY id_partido
-            ) vend ON vend.id_partido = p.id_partido
-            """);
-        sql.AppendLine();
+            LEFT JOIN capacidad_evento cap ON cap.id_partido = p.id_partido
+            LEFT JOIN ventas_evento ven ON ven.id_partido = p.id_partido
+            ORDER BY p.fecha, p.hora
+            LIMIT @limit;
+            """;
 
-        if (!string.IsNullOrWhiteSpace(pais))
-            sql.AppendLine("WHERE est.pais::text = @pais");
-
-        sql.AppendLine("""
-            ORDER BY
-                CASE WHEN COALESCE(cap.capacidad_habilitada, 0) = 0 THEN 0
-                     ELSE COALESCE(vend.entradas_vendidas, 0)::numeric / cap.capacidad_habilitada
-                END DESC,
-                p.fecha,
-                p.hora;
-            """);
-
-        await using var command = new NpgsqlCommand(sql.ToString(), connection);
-
-        if (!string.IsNullOrWhiteSpace(pais))
-            command.Parameters.AddWithValue("pais", PaisSedeNormalizer.Normalize(pais));
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("limit", limit);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-
-        var ocupaciones = new List<OcupacionEventoResponse>();
+        var reportes = new List<OcupacionEventoResponse>();
 
         while (await reader.ReadAsync(cancellationToken))
         {
             var capacidad = reader.GetInt32(reader.GetOrdinal("capacidad_habilitada"));
             var vendidas = reader.GetInt32(reader.GetOrdinal("entradas_vendidas"));
 
-            ocupaciones.Add(new OcupacionEventoResponse
+            reportes.Add(new OcupacionEventoResponse
             {
                 IdPartido = reader.GetInt32(reader.GetOrdinal("id_partido")),
-                Fecha = reader.GetFieldValue<DateOnly>(reader.GetOrdinal("fecha")),
-                Hora = reader.GetFieldValue<TimeOnly>(reader.GetOrdinal("hora")),
+                Fecha = reader.GetFieldValue<DateOnly>(reader.GetOrdinal("fecha_partido")),
+                Hora = reader.GetFieldValue<TimeOnly>(reader.GetOrdinal("hora_partido")),
                 EquipoLocal = reader.GetString(reader.GetOrdinal("equipo_local")),
                 EquipoVisitante = reader.GetString(reader.GetOrdinal("equipo_visitante")),
                 IdEstadio = reader.GetInt32(reader.GetOrdinal("id_estadio")),
                 Estadio = reader.GetString(reader.GetOrdinal("nombre_estadio")),
-                Ciudad = reader.IsDBNull(reader.GetOrdinal("ciudad"))
-                    ? ""
-                    : reader.GetString(reader.GetOrdinal("ciudad")),
+                Ciudad = reader.GetString(reader.GetOrdinal("ciudad")),
                 Pais = reader.GetString(reader.GetOrdinal("pais_estadio")),
                 CapacidadHabilitada = capacidad,
                 EntradasVendidas = vendidas,
-                PorcentajeOcupacion = capacidad == 0
-                    ? 0
-                    : Math.Round(vendidas * 100.0 / capacidad, 2)
+                PorcentajeOcupacion = capacidad == 0 ? 0 : Math.Round(vendidas * 100.0 / capacidad, 2)
             });
         }
 
-        return ocupaciones;
+        return reportes;
     }
 
     public async Task<ResumenValidacionesResponse> GetResumenValidacionesAsync(CancellationToken cancellationToken = default)
@@ -227,14 +200,15 @@ public sealed class ReporteRepository : IReporteRepository
 
         const string sql = """
             SELECT
-                COUNT(*)::int AS total_validaciones,
-                COUNT(*) FILTER (WHERE estado = 'válida')::int AS validaciones_validas,
-                COUNT(*) FILTER (WHERE estado = 'inválida')::int AS validaciones_invalidas,
-                COUNT(DISTINCT id_entrada) FILTER (WHERE estado = 'válida')::int AS entradas_consumidas
-            FROM valida;
+                (SELECT COUNT(*)::int FROM valida) AS total_validaciones,
+                (SELECT COUNT(*)::int FROM valida WHERE estado::text = @estado_valida) AS validaciones_validas,
+                (SELECT COUNT(*)::int FROM valida WHERE estado::text = @estado_invalida) AS validaciones_invalidas,
+                (SELECT COUNT(*)::int FROM entrada WHERE estado = 'consumida') AS entradas_consumidas;
             """;
 
         await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("estado_valida", "v\u00e1lida");
+        command.Parameters.AddWithValue("estado_invalida", "inv\u00e1lida");
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
         if (!await reader.ReadAsync(cancellationToken))

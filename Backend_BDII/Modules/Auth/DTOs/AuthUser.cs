@@ -1,4 +1,4 @@
-namespace Backend_BDII.Modules.Auth.Models;
+namespace Backend_BDII.Modules.Auth.DTOs;
 
 public sealed class AuthUser
 {

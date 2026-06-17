@@ -91,14 +91,13 @@ public sealed class InfraestructuraRepository : IInfraestructuraRepository
                 VALUES (CAST(@nombre_sector AS sector_enum), @capacidad, @id_estadio, @costo);
                 """;
 
-            foreach (var sector in CrearSectoresPorDefecto(request.Capacidad))
+            foreach (var sector in request.Sectores)
             {
                 await using var command = new NpgsqlCommand(insertSectorSql, connection, transaction);
-                command.Parameters.AddWithValue("nombre_sector", sector.NombreSector);
-                command.Parameters.AddWithValue("capacidad", sector.Capacidad);
+                command.Parameters.AddWithValue("nombre_sector", sector.NombreSector.Trim().ToUpperInvariant());
+                command.Parameters.AddWithValue("capacidad", (object?)sector.Capacidad ?? DBNull.Value);
                 command.Parameters.AddWithValue("id_estadio", idEstadio);
-                command.Parameters.AddWithValue("costo", sector.Costo);
-
+                command.Parameters.AddWithValue("costo", (object?)sector.Costo ?? DBNull.Value);
                 await command.ExecuteNonQueryAsync(cancellationToken);
             }
 
@@ -116,70 +115,60 @@ public sealed class InfraestructuraRepository : IInfraestructuraRepository
     }
 
     public async Task<EstadioResponse?> ActualizarEstadioAsync(
-    int idEstadio,
-    string emailAdmin,
-    ActualizarEstadioRequest request,
-    CancellationToken cancellationToken = default)
-{
-    await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
-    await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-
-    try
+        int idEstadio,
+        string emailAdmin,
+        ActualizarEstadioRequest request,
+        CancellationToken cancellationToken = default)
     {
-        var paisActual = await GetPaisEstadioAsync(connection, transaction, idEstadio, cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
-        if (paisActual is null)
+        try
+        {
+            var pais = PaisSedeNormalizer.Normalize(request.Pais);
+            await ValidarPaisAdminAsync(connection, transaction, emailAdmin, pais, cancellationToken);
+
+            const string updateSql = """
+                UPDATE estadio
+                SET nombre_estadio = @nombre,
+                    capacidad = @capacidad,
+                    ubicacion = @ubicacion,
+                    ciudad = @ciudad,
+                    pais = CAST(@pais AS pais_sede_enum)
+                WHERE id_estadio = @id_estadio;
+                """;
+
+            int affectedRows;
+
+            await using (var command = new NpgsqlCommand(updateSql, connection, transaction))
+            {
+                command.Parameters.AddWithValue("id_estadio", idEstadio);
+                command.Parameters.AddWithValue("nombre", request.Nombre.Trim());
+                command.Parameters.AddWithValue("capacidad", (object?)request.Capacidad ?? DBNull.Value);
+                command.Parameters.AddWithValue("ubicacion", (object?)request.Ubicacion?.Trim() ?? DBNull.Value);
+                command.Parameters.AddWithValue("ciudad", (object?)request.Ciudad?.Trim() ?? DBNull.Value);
+                command.Parameters.AddWithValue("pais", pais);
+
+                affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            if (affectedRows == 0)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return null;
+            }
+
+            var estadio = await GetEstadioByIdUsingConnectionAsync(connection, idEstadio, transaction, cancellationToken);
+
+            await transaction.CommitAsync(cancellationToken);
+            return estadio;
+        }
+        catch
         {
             await transaction.RollbackAsync(cancellationToken);
-            return null;
+            throw;
         }
-
-        await ValidarPaisAdminAsync(connection, transaction, emailAdmin, paisActual, cancellationToken);
-
-        var paisNuevo = PaisSedeNormalizer.Normalize(request.Pais);
-
-        if (!string.Equals(paisNuevo, PaisSedeNormalizer.Normalize(paisActual), StringComparison.Ordinal))
-            throw new InvalidOperationException("No se puede cambiar el país sede de un estadio existente.");
-
-        const string updateSql = """
-            UPDATE estadio
-            SET nombre_estadio = @nombre,
-                capacidad = @capacidad,
-                ubicacion = @ubicacion,
-                ciudad = @ciudad
-            WHERE id_estadio = @id_estadio;
-            """;
-
-        int affectedRows;
-
-        await using (var command = new NpgsqlCommand(updateSql, connection, transaction))
-        {
-            command.Parameters.AddWithValue("id_estadio", idEstadio);
-            command.Parameters.AddWithValue("nombre", request.Nombre.Trim());
-            command.Parameters.AddWithValue("capacidad", (object?)request.Capacidad ?? DBNull.Value);
-            command.Parameters.AddWithValue("ubicacion", (object?)request.Ubicacion?.Trim() ?? DBNull.Value);
-            command.Parameters.AddWithValue("ciudad", (object?)request.Ciudad?.Trim() ?? DBNull.Value);
-
-            affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);
-        }
-
-        if (affectedRows == 0)
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            return null;
-        }
-
-        var estadio = await GetEstadioByIdUsingConnectionAsync(connection, idEstadio, transaction, cancellationToken);
-
-        await transaction.CommitAsync(cancellationToken);
-        return estadio;
     }
-    catch
-    {
-        await transaction.RollbackAsync(cancellationToken);
-        throw;
-    }
-}
 
     public async Task<SectorInfraestructuraResponse?> ActualizarSectorAsync(
         int idEstadio,
@@ -544,22 +533,4 @@ public sealed class InfraestructuraRepository : IInfraestructuraRepository
             NombreFuncionario = reader.GetString(reader.GetOrdinal("nombre_funcionario"))
         };
     }
-    
-    private static List<SectorDefault> CrearSectoresPorDefecto(int capacidadEstadio)
-    {
-        var capacidadA = (int)Math.Floor(capacidadEstadio * 0.25);
-        var capacidadB = (int)Math.Floor(capacidadEstadio * 0.25);
-        var capacidadC = (int)Math.Floor(capacidadEstadio * 0.25);
-        var capacidadD = capacidadEstadio - capacidadA - capacidadB - capacidadC;
-
-        return
-        [
-            new SectorDefault("A", capacidadA, 300),
-            new SectorDefault("B", capacidadB, 220),
-            new SectorDefault("C", capacidadC, 160),
-            new SectorDefault("D", capacidadD, 100)
-        ];
-    }
-
-    private sealed record SectorDefault(string NombreSector, int Capacidad, int Costo);
 }

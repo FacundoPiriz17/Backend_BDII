@@ -35,12 +35,10 @@ public sealed class InfraestructuraService : IInfraestructuraService
         CrearEstadioRequest request,
         CancellationToken cancellationToken = default)
     {
-        ValidarCreacionEstadio(request.Nombre, request.Capacidad, request.Pais);
+        ValidarEstadio(request.Nombre, request.Capacidad, request.Pais);
+        ValidarSectoresCreacion(request.Sectores);
 
-        return _infraestructuraRepository.CrearEstadioAsync(
-            NormalizeEmail(emailAdmin),
-            request,
-            cancellationToken);
+        return _infraestructuraRepository.CrearEstadioAsync(NormalizeEmail(emailAdmin), request, cancellationToken);
     }
 
     public async Task<EstadioResponse> ActualizarEstadioAsync(
@@ -49,7 +47,7 @@ public sealed class InfraestructuraService : IInfraestructuraService
         ActualizarEstadioRequest request,
         CancellationToken cancellationToken = default)
     {
-        ValidarActualizacionEstadio(request.Nombre, request.Capacidad, request.Pais);
+        ValidarEstadio(request.Nombre, request.Capacidad, request.Pais);
 
         return await _infraestructuraRepository.ActualizarEstadioAsync(
                    idEstadio,
@@ -124,19 +122,7 @@ public sealed class InfraestructuraService : IInfraestructuraService
                ?? throw new KeyNotFoundException("Dispositivo no encontrado.");
     }
 
-    private static void ValidarCreacionEstadio(string nombre, int capacidad, string pais)
-    {
-        if (string.IsNullOrWhiteSpace(nombre) || nombre.Trim().Length < 3)
-            throw new InvalidOperationException("El nombre del estadio debe tener al menos 3 caracteres.");
-
-        if (capacidad <= 0)
-            throw new InvalidOperationException("La capacidad del estadio debe ser mayor a 0.");
-
-        if (string.IsNullOrWhiteSpace(pais))
-            throw new InvalidOperationException("El país del estadio es obligatorio.");
-    }
-
-    private static void ValidarActualizacionEstadio(string nombre, int? capacidad, string pais)
+    private static void ValidarEstadio(string nombre, int? capacidad, string pais)
     {
         if (string.IsNullOrWhiteSpace(nombre) || nombre.Trim().Length < 3)
             throw new InvalidOperationException("El nombre del estadio debe tener al menos 3 caracteres.");
@@ -145,7 +131,30 @@ public sealed class InfraestructuraService : IInfraestructuraService
             throw new InvalidOperationException("La capacidad del estadio debe ser mayor a 0.");
 
         if (string.IsNullOrWhiteSpace(pais))
-            throw new InvalidOperationException("El país del estadio es obligatorio.");
+            throw new InvalidOperationException("El pais del estadio es obligatorio.");
+    }
+
+    private static void ValidarSectoresCreacion(List<CrearSectorRequest>? sectores)
+    {
+        if (sectores is null || sectores.Count == 0)
+            throw new InvalidOperationException("Debe crear al menos un sector para el estadio.");
+
+        var nombres = sectores.Select(s => s.NombreSector.Trim().ToUpperInvariant()).ToList();
+
+        if (nombres.Any(s => !SectoresValidos.Contains(s)))
+            throw new InvalidOperationException("Los sectores deben ser A, B, C o D.");
+
+        if (nombres.Count != nombres.Distinct().Count())
+            throw new InvalidOperationException("No se pueden repetir sectores.");
+
+        foreach (var sector in sectores)
+        {
+            if (sector.Capacidad.HasValue && sector.Capacidad.Value <= 0)
+                throw new InvalidOperationException("La capacidad del sector debe ser mayor a 0.");
+
+            if (sector.Costo.HasValue && sector.Costo.Value < 0)
+                throw new InvalidOperationException("El costo del sector no puede ser negativo.");
+        }
     }
 
     private static void ValidarEmailFuncionario(string email)

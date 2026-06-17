@@ -1,3 +1,4 @@
+using Backend_BDII.Common.Auditing;
 using Backend_BDII.Modules.Eventos.DTOs;
 using Backend_BDII.Modules.Eventos.Repositories;
 
@@ -5,15 +6,7 @@ namespace Backend_BDII.Modules.Eventos.Services;
 
 public sealed class EventoService : IEventoService
 {
-    private static readonly HashSet<string> SectoresValidos = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "A",
-        "B",
-        "C",
-        "D"
-    };
-
-    private static readonly HashSet<string> FasesValidas = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> FasesValidas = new(StringComparer.OrdinalIgnoreCase)
     {
         "Fase de grupos",
         "Dieciseisavos de final",
@@ -23,26 +16,51 @@ public sealed class EventoService : IEventoService
         "Final"
     };
 
-    private static readonly HashSet<string> EstadosValidos = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> EstadosValidos = new(StringComparer.OrdinalIgnoreCase)
     {
-        "no empezado",
+        "terminado",
         "empezado",
-        "terminado"
+        "no empezado"
+    };
+
+    private static readonly HashSet<string> SectoresValidos = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "A",
+        "B",
+        "C",
+        "D"
     };
 
     private readonly IEventoRepository _eventoRepository;
+    private readonly IAuditService _auditService;
 
-    public EventoService(IEventoRepository eventoRepository)
+    public EventoService(IEventoRepository eventoRepository, IAuditService auditService)
     {
         _eventoRepository = eventoRepository;
+        _auditService = auditService;
     }
 
-    public Task<List<EventoResponse>> GetEventosAsync(string? pais, string? estado, CancellationToken cancellationToken = default)
+    public Task<List<EventoResponse>> GetAllAsync(
+        bool soloFuturos,
+        string? busqueda,
+        string? pais,
+        string? equipo,
+        string? fase,
+        string? estado,
+        DateOnly? desde,
+        DateOnly? hasta,
+        CancellationToken cancellationToken = default)
     {
-        if (!string.IsNullOrWhiteSpace(estado))
-            ValidarEstado(estado);
+        if (!string.IsNullOrWhiteSpace(fase) && !FasesValidas.Contains(fase.Trim()))
+            throw new InvalidOperationException("La fase del partido no es valida.");
 
-        return _eventoRepository.GetEventosAsync(pais, estado, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(estado) && !EstadosValidos.Contains(estado.Trim()))
+            throw new InvalidOperationException("El estado del partido no es valido.");
+
+        if (desde.HasValue && hasta.HasValue && desde > hasta)
+            throw new InvalidOperationException("La fecha desde no puede ser posterior a la fecha hasta.");
+
+        return _eventoRepository.GetAllAsync(soloFuturos, busqueda, pais, equipo, fase, estado, desde, hasta, cancellationToken);
     }
 
     public Task<EventoResponse?> GetByIdAsync(int idPartido, CancellationToken cancellationToken = default)
@@ -50,16 +68,23 @@ public sealed class EventoService : IEventoService
         return _eventoRepository.GetByIdAsync(idPartido, cancellationToken);
     }
 
-    public Task<EventoResponse> CrearAsync(
+    public async Task<EventoResponse> CrearAsync(
         string emailAdmin,
         CrearEventoRequest request,
         CancellationToken cancellationToken = default)
     {
-        ValidarEquipos(request.EquipoLocal, request.EquipoVisitante);
-        ValidarFase(request.Fase);
-        ValidarSectores(request.SectoresHabilitados);
+        var email = NormalizeEmail(emailAdmin);
+        ValidarDatosEvento(request.EquipoLocal, request.EquipoVisitante, request.Costo, request.Fase, request.SectoresHabilitados);
+        var evento = await _eventoRepository.CrearAsync(email, request, cancellationToken);
 
-        return _eventoRepository.CrearAsync(NormalizeEmail(emailAdmin), request, cancellationToken);
+        _auditService.Record("evento.crear", email, new
+        {
+            evento.IdPartido,
+            evento.EquipoLocal,
+            evento.EquipoVisitante
+        });
+
+        return evento;
     }
 
     public async Task<EventoResponse> ActualizarAsync(
@@ -68,56 +93,79 @@ public sealed class EventoService : IEventoService
         ActualizarEventoRequest request,
         CancellationToken cancellationToken = default)
     {
-        ValidarEquipos(request.EquipoLocal, request.EquipoVisitante);
-        ValidarFase(request.Fase);
-        ValidarEstado(request.Estado);
-        ValidarSectores(request.SectoresHabilitados);
+        ValidarDatosEvento(request.EquipoLocal, request.EquipoVisitante, request.Costo, request.Fase, request.SectoresHabilitados);
 
-        return await _eventoRepository.ActualizarAsync(idPartido, NormalizeEmail(emailAdmin), request, cancellationToken)
+        if (!EstadosValidos.Contains(request.Estado))
+            throw new InvalidOperationException("El estado del partido no es valido.");
+
+        if (request.MarcadorLocal < 0 || request.MarcadorVisitante < 0)
+            throw new InvalidOperationException("Los marcadores no pueden ser negativos.");
+
+        var email = NormalizeEmail(emailAdmin);
+        var evento = await _eventoRepository.ActualizarAsync(
+                   idPartido,
+                   email,
+                   request,
+                   cancellationToken)
                ?? throw new KeyNotFoundException("Evento no encontrado.");
+
+        _auditService.Record("evento.actualizar", email, new { evento.IdPartido });
+
+        return evento;
     }
 
     public async Task<EventoResponse> CambiarEstadoAsync(
         int idPartido,
         string emailAdmin,
-        string nuevoEstado,
+        CambiarEstadoEventoRequest request,
         CancellationToken cancellationToken = default)
     {
-        ValidarEstado(nuevoEstado);
+        var estado = request.Estado.Trim().ToLowerInvariant();
 
-        return await _eventoRepository.CambiarEstadoAsync(idPartido, NormalizeEmail(emailAdmin), nuevoEstado, cancellationToken)
+        if (!EstadosValidos.Contains(estado))
+            throw new InvalidOperationException("El estado debe ser terminado, empezado o no empezado.");
+
+        var email = NormalizeEmail(emailAdmin);
+        var evento = await _eventoRepository.CambiarEstadoAsync(
+                   idPartido,
+                   email,
+                   estado,
+                   cancellationToken)
                ?? throw new KeyNotFoundException("Evento no encontrado.");
-    }
 
-    private static void ValidarEquipos(string equipoLocal, string equipoVisitante)
-    {
-        if (string.Equals(equipoLocal.Trim(), equipoVisitante.Trim(), StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("El equipo local y el visitante no pueden ser el mismo.");
-    }
-
-    private static void ValidarFase(string fase)
-    {
-        if (!FasesValidas.Contains(fase.Trim()))
-            throw new InvalidOperationException(
-                "La fase debe ser una de: Fase de grupos, Dieciseisavos de final, Octavos de final, Cuartos de final, Semifinal, Final.");
-    }
-
-    private static void ValidarEstado(string estado)
-    {
-        if (!EstadosValidos.Contains(estado.Trim()))
-            throw new InvalidOperationException("El estado debe ser: no empezado, empezado o terminado.");
-    }
-
-    private static void ValidarSectores(IReadOnlyCollection<string> sectores)
-    {
-        if (sectores.Count == 0)
-            throw new InvalidOperationException("Debe habilitar al menos un sector.");
-
-        foreach (var sector in sectores)
+        _auditService.Record("evento.estado", email, new
         {
-            if (!SectoresValidos.Contains(sector.Trim()))
-                throw new InvalidOperationException("Los sectores habilitados deben ser A, B, C o D.");
-        }
+            evento.IdPartido,
+            evento.Estado
+        });
+
+        return evento;
+    }
+
+    private static void ValidarDatosEvento(
+        string equipoLocal,
+        string equipoVisitante,
+        int costo,
+        string fase,
+        List<string>? sectores)
+    {
+        if (string.IsNullOrWhiteSpace(equipoLocal) || string.IsNullOrWhiteSpace(equipoVisitante))
+            throw new InvalidOperationException("Los equipos local y visitante son obligatorios.");
+
+        if (equipoLocal.Trim().Equals(equipoVisitante.Trim(), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("El equipo local y visitante deben ser distintos.");
+
+        if (costo < 0)
+            throw new InvalidOperationException("El costo base no puede ser negativo.");
+
+        if (!FasesValidas.Contains(fase))
+            throw new InvalidOperationException("La fase del partido no es valida.");
+
+        if (sectores is null || sectores.Count == 0)
+            throw new InvalidOperationException("Debe habilitar al menos un sector para el evento.");
+
+        if (sectores.Any(s => string.IsNullOrWhiteSpace(s) || !SectoresValidos.Contains(s.Trim())))
+            throw new InvalidOperationException("Los sectores habilitados deben ser A, B, C o D.");
     }
 
     private static string NormalizeEmail(string email)
