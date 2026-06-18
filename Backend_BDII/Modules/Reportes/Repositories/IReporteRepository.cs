@@ -8,4 +8,5 @@ public interface IReporteRepository
     Task<List<MayorCompradorResponse>> GetMayoresCompradoresAsync(int limit, CancellationToken cancellationToken = default);
     Task<List<OcupacionEventoResponse>> GetOcupacionEventosAsync(int limit, CancellationToken cancellationToken = default);
     Task<ResumenValidacionesResponse> GetResumenValidacionesAsync(CancellationToken cancellationToken = default);
+    Task<List<AuditoriaEntradaResponse>> GetAuditoriaAsync(string? tipo, int limit, CancellationToken cancellationToken = default);
 }

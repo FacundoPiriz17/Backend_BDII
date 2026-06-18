@@ -1,3 +1,4 @@
+using Backend_BDII.Common.Responses;
 using Backend_BDII.Modules.Reportes.DTOs;
 using Backend_BDII.Modules.Reportes.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -49,5 +50,22 @@ public sealed class ReportesController : ControllerBase
     {
         var reporte = await _reporteService.GetResumenValidacionesAsync(cancellationToken);
         return Ok(reporte);
+    }
+    
+    [HttpGet("auditoria")]
+    public async Task<ActionResult<List<AuditoriaEntradaResponse>>> GetAuditoria(
+        [FromQuery] string? tipo,
+        [FromQuery] int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var reporte = await _reporteService.GetAuditoriaAsync(tipo, limit, cancellationToken);
+            return Ok(reporte);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return this.BadRequestError(ex.Message);
+        }
     }
 }

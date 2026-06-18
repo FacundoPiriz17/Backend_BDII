@@ -58,6 +58,9 @@ public sealed class UsuarioService : IUsuarioService
         ValidarUsuarioBase(request.Email, request.Nombre, request.Password, request.PaisDocumento, request.TipoDocumento, request.NumeroDocumento);
         ValidarRoles(request.Roles, request.PaisAdmin, request.NumeroLegajo);
 
+        if (NormalizeRoles(request.Roles).Count > 1)
+            throw new InvalidOperationException("Al crear un usuario solo se puede asignar un rol.");
+
         var normalizedRequest = new CrearUsuarioAdminRequest
         {
             Email = NormalizeEmail(request.Email),
@@ -137,9 +140,7 @@ public sealed class UsuarioService : IUsuarioService
 
         if (string.IsNullOrWhiteSpace(request.Nombre) || request.Nombre.Trim().Length < 3)
             throw new InvalidOperationException("El nombre debe tener al menos 3 caracteres.");
-
-        // Tomamos el estado actual para NO alterar documento ni habilitacion:
-        // un usuario no puede auto-deshabilitarse ni cambiar su identidad.
+        
         var actual = await _usuarioRepository.GetByEmailAsync(normalizedEmail, cancellationToken)
             ?? throw new KeyNotFoundException("Usuario no encontrado.");
 
@@ -179,6 +180,9 @@ public sealed class UsuarioService : IUsuarioService
         bool habilitado,
         CancellationToken cancellationToken = default)
     {
+        if (NormalizeEmail(emailAdmin) == NormalizeEmail(email))
+            throw new InvalidOperationException("No podés cambiar tu propio estado de habilitación.");
+
         var usuario = await _usuarioRepository.ActualizarHabilitacionAsync(
             NormalizeEmail(email),
             habilitado,
@@ -199,6 +203,9 @@ public sealed class UsuarioService : IUsuarioService
         ActualizarRolesUsuarioRequest request,
         CancellationToken cancellationToken = default)
     {
+        if (NormalizeEmail(emailAdmin) == NormalizeEmail(email))
+            throw new InvalidOperationException("No podés modificar tus propios roles.");
+
         ValidarRoles(request.Roles, request.PaisAdmin, request.NumeroLegajo);
 
         var normalizedRequest = new ActualizarRolesUsuarioRequest

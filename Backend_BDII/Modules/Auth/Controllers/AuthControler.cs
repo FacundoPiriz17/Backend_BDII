@@ -89,6 +89,30 @@ public sealed class AuthController : ControllerBase
         }
     }
 
+    [HttpPost("cambiar-contrasena")]
+    [Authorize]
+    public async Task<IActionResult> CambiarContrasena([FromBody] CambiarContrasenaRequest request, CancellationToken cancellationToken)
+    {
+        var email = User.FindFirstValue(ClaimTypes.Email);
+
+        if (string.IsNullOrWhiteSpace(email))
+            return this.UnauthorizedError("No se pudo obtener el email del token.");
+
+        try
+        {
+            await _authService.CambiarContrasenaAsync(email, request.ContrasenaActual, request.ContrasenaNueva, cancellationToken);
+            return Ok(new { message = "Contraseña actualizada correctamente." });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return this.UnauthorizedError(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return this.BadRequestError(ex.Message);
+        }
+    }
+
     [HttpGet("me")]
     [Authorize]
     [ProducesResponseType(typeof(MiPerfilResponse), StatusCodes.Status200OK)]

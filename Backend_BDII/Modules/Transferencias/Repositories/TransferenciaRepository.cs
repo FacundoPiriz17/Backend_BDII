@@ -36,11 +36,14 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
                 SELECT 1
                 FROM entrada e
                 INNER JOIN compra c ON c.id_compra = e.id_compra
+                INNER JOIN partido p ON p.id_partido = e.id_partido
                 WHERE e.id_entrada = @id_entrada
                   AND LOWER(e.email_propietario_actual) = LOWER(@email_origen)
                   AND e.estado = 'activa'
                   AND e.transferencias_restantes > 0
                   AND c.estado = 'paga'
+                  AND p.estado = 'no empezado'
+                  AND (p.fecha > CURRENT_DATE OR (p.fecha = CURRENT_DATE AND p.hora > LOCALTIME))
             )
             RETURNING id_transferencia;
             """;
@@ -58,7 +61,7 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
         }
 
         if (idTransferencia is null)
-            throw new InvalidOperationException("La entrada no existe, no esta activa, no pertenece al usuario, no tiene transferencias restantes o su compra no esta paga.");
+            throw new InvalidOperationException("No se puede transferir: la entrada no existe, no está activa, no es tuya, no le quedan transferencias, su compra no está paga, o el partido ya empezó/terminó.");
         
         return await GetByIdUsingConnectionAsync(connection, idTransferencia.Value, emailOrigen, cancellationToken)
                ?? throw new InvalidOperationException("La transferencia fue creada, pero no se pudo recuperar.");

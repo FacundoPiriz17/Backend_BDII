@@ -32,6 +32,21 @@ public sealed class ReporteService : IReporteService
         return _reporteRepository.GetResumenValidacionesAsync(cancellationToken);
     }
 
+    private static readonly HashSet<string> TiposAuditoria = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "compra", "transferencia", "validacion"
+    };
+
+    public Task<List<AuditoriaEntradaResponse>> GetAuditoriaAsync(string? tipo, int limit, CancellationToken cancellationToken = default)
+    {
+        string? tipoNorm = string.IsNullOrWhiteSpace(tipo) ? null : tipo.Trim().ToLowerInvariant();
+
+        if (tipoNorm is not null && !TiposAuditoria.Contains(tipoNorm))
+            throw new InvalidOperationException("El tipo debe ser compra, transferencia o validacion.");
+
+        return _reporteRepository.GetAuditoriaAsync(tipoNorm, Math.Clamp(limit, 1, 500), cancellationToken);
+    }
+
     private static int NormalizeLimit(int limit)
     {
         return Math.Clamp(limit, 1, 100);

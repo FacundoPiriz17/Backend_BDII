@@ -75,6 +75,14 @@ public sealed class EventoService : IEventoService
     {
         var email = NormalizeEmail(emailAdmin);
         ValidarDatosEvento(request.EquipoLocal, request.EquipoVisitante, request.Costo, request.Fase, request.SectoresHabilitados);
+
+        if (request.Fecha < DateOnly.FromDateTime(DateTime.Today))
+            throw new InvalidOperationException("No se puede crear un partido en una fecha anterior a hoy.");
+
+        var ctx = await _eventoRepository.GetContextoEventoAsync(
+            email, request.IdEstadio, request.EquipoLocal, request.EquipoVisitante, cancellationToken);
+        ValidarContextoEvento(ctx, request.Fase);
+
         var evento = await _eventoRepository.CrearAsync(email, request, cancellationToken);
 
         _auditService.Record("evento.crear", email, new
@@ -102,6 +110,32 @@ public sealed class EventoService : IEventoService
             throw new InvalidOperationException("Los marcadores no pueden ser negativos.");
 
         var email = NormalizeEmail(emailAdmin);
+        
+        var actual = await _eventoRepository.GetByIdAsync(idPartido, cancellationToken)
+            ?? throw new KeyNotFoundException("Evento no encontrado.");
+
+        if (actual.Estado == "terminado")
+            throw new InvalidOperationException("Un partido terminado no se puede editar.");
+
+        if (actual.Estado == "empezado")
+        {
+            var soloMarcador =
+                actual.Fecha == request.Fecha &&
+                actual.Hora == request.Hora &&
+                actual.Estadio.IdEstadio == request.IdEstadio &&
+                string.Equals(actual.EquipoLocal, request.EquipoLocal.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(actual.EquipoVisitante, request.EquipoVisitante.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                actual.CostoBase == request.Costo &&
+                string.Equals(actual.Fase, request.Fase.Trim(), StringComparison.OrdinalIgnoreCase);
+
+            if (!soloMarcador)
+                throw new InvalidOperationException("Un partido en juego solo permite modificar el marcador.");
+        }
+
+        var ctx = await _eventoRepository.GetContextoEventoAsync(
+            email, request.IdEstadio, request.EquipoLocal, request.EquipoVisitante, cancellationToken);
+        ValidarContextoEvento(ctx, request.Fase);
+
         var evento = await _eventoRepository.ActualizarAsync(
                    idPartido,
                    email,
@@ -140,6 +174,27 @@ public sealed class EventoService : IEventoService
         });
 
         return evento;
+    }
+    
+    private static void ValidarContextoEvento(EventoCreacionContexto ctx, string fase)
+    {
+        if (string.IsNullOrWhiteSpace(ctx.PaisAdmin))
+            throw new InvalidOperationException("El administrador no tiene país sede asignado.");
+
+        if (string.IsNullOrWhiteSpace(ctx.PaisEstadio))
+            throw new InvalidOperationException("El estadio indicado no existe.");
+
+        if (!string.Equals(ctx.PaisAdmin, ctx.PaisEstadio, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"Solo podés gestionar eventos en estadios de tu país sede ({ctx.PaisAdmin}).");
+
+        if (string.IsNullOrWhiteSpace(ctx.GrupoLocal) || string.IsNullOrWhiteSpace(ctx.GrupoVisitante))
+            throw new InvalidOperationException("Alguno de los equipos indicados no existe.");
+
+        if (fase.Trim().Equals("Fase de grupos", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(ctx.GrupoLocal, ctx.GrupoVisitante, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                "En fase de grupos ambos equipos deben pertenecer al mismo grupo.");
     }
 
     private static void ValidarDatosEvento(

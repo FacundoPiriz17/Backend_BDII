@@ -50,6 +50,11 @@ public sealed class EventoRepository : IEventoRepository
                     OR p.equipo_visitante ILIKE @busqueda
                     OR est.nombre_estadio ILIKE @busqueda
                     OR est.ciudad ILIKE @busqueda
+                    OR EXISTS (
+                        SELECT 1 FROM equipo eq
+                        WHERE eq.codigo_fifa IN (p.equipo_local, p.equipo_visitante)
+                          AND eq.nombre_equipo ILIKE @busqueda
+                    )
                 )
                 """);
         }
@@ -107,6 +112,37 @@ public sealed class EventoRepository : IEventoRepository
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
         return await GetByIdUsingConnectionAsync(connection, idPartido, null, cancellationToken);
+    }
+
+    public async Task<EventoCreacionContexto> GetContextoEventoAsync(
+        string emailAdmin, int idEstadio, string equipoLocal, string equipoVisitante,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+
+        const string sql = """
+            SELECT
+                (SELECT a.pais::text FROM admin a WHERE LOWER(a.email_admin) = LOWER(@email)) AS pais_admin,
+                (SELECT e.pais::text FROM estadio e WHERE e.id_estadio = @id_estadio)          AS pais_estadio,
+                (SELECT eq.grupo FROM equipo eq WHERE eq.codigo_fifa = @local)                 AS grupo_local,
+                (SELECT eq.grupo FROM equipo eq WHERE eq.codigo_fifa = @visitante)             AS grupo_visitante;
+            """;
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("email", emailAdmin);
+        command.Parameters.AddWithValue("id_estadio", idEstadio);
+        command.Parameters.AddWithValue("local", NormalizeEquipo(equipoLocal));
+        command.Parameters.AddWithValue("visitante", NormalizeEquipo(equipoVisitante));
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+            return new EventoCreacionContexto(null, null, null, null);
+
+        string? Get(string col) =>
+            reader.IsDBNull(reader.GetOrdinal(col)) ? null : reader.GetString(reader.GetOrdinal(col));
+
+        return new EventoCreacionContexto(
+            Get("pais_admin"), Get("pais_estadio"), Get("grupo_local"), Get("grupo_visitante"));
     }
 
     public async Task<EventoResponse> CrearAsync(

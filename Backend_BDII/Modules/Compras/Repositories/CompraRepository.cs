@@ -203,14 +203,19 @@ public sealed class CompraRepository : ICompraRepository
             INNER JOIN compra c ON c.id_compra = e.id_compra
             INNER JOIN partido p ON p.id_partido = e.id_partido
             INNER JOIN estadio est ON est.id_estadio = e.id_estadio
+            LEFT JOIN equipo el ON el.codigo_fifa = p.equipo_local
+            LEFT JOIN equipo ev ON ev.codigo_fifa = p.equipo_visitante
             WHERE LOWER(e.email_propietario_actual) = LOWER(@email_usuario)
-              AND c.estado = 'paga'   AND e.estado = 'activa'
-              AND e.estado = 'activa'
+              AND c.estado = 'paga'
             """);
         sql.AppendLine();
 
+        // Filtro de estado: si no se especifica, ocultamos las canceladas
+        // (la billetera muestra entradas vigentes y ya consumidas).
         if (!string.IsNullOrWhiteSpace(estado))
             sql.AppendLine("AND e.estado = CAST(@estado AS estado_entrada_enum)");
+        else
+            sql.AppendLine("AND e.estado <> 'cancelada'");
 
         if (idPartido.HasValue)
             sql.AppendLine("AND p.id_partido = @id_partido");
@@ -221,6 +226,8 @@ public sealed class CompraRepository : ICompraRepository
                 AND (
                     p.equipo_local ILIKE @busqueda
                     OR p.equipo_visitante ILIKE @busqueda
+                    OR el.nombre_equipo ILIKE @busqueda
+                    OR ev.nombre_equipo ILIKE @busqueda
                     OR est.nombre_estadio ILIKE @busqueda
                     OR est.ciudad ILIKE @busqueda
                 )
