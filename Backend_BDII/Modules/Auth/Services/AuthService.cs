@@ -97,11 +97,36 @@ public class AuthService : IAuthService
             Roles = roles
         };
     }
+    
+    public async Task CambiarContrasenaAsync(
+        string email,
+        string contrasenaActual,
+        string contrasenaNueva,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedEmail = email.Trim().ToLowerInvariant();
 
-    /// <summary>
-    /// Emite un JWT nuevo para un usuario ya autenticado (renovación de sesión).
-    /// Se vuelve a leer el usuario para reflejar cambios de rol / habilitación.
-    /// </summary>
+        if (string.IsNullOrWhiteSpace(contrasenaNueva) || contrasenaNueva.Length < 6)
+            throw new InvalidOperationException("La nueva contraseña debe tener al menos 6 caracteres.");
+
+        if (contrasenaActual == contrasenaNueva)
+            throw new InvalidOperationException("La nueva contraseña debe ser distinta a la actual.");
+
+        var user = await _authRepository.GetByEmailAsync(normalizedEmail, cancellationToken)
+            ?? throw new UnauthorizedAccessException("Usuario no encontrado.");
+
+        if (!_passwordHasher.Verify(contrasenaActual, user.PasswordHash))
+            throw new UnauthorizedAccessException("La contraseña actual es incorrecta.");
+
+        var hash = _passwordHasher.Hash(contrasenaNueva);
+        var ok = await _authRepository.ActualizarContrasenaAsync(normalizedEmail, hash, cancellationToken);
+
+        if (!ok)
+            throw new InvalidOperationException("No se pudo actualizar la contraseña.");
+
+        _auditService.Record("auth.cambiar_contrasena", normalizedEmail, null);
+    }
+    
     public async Task<AuthResponse> RefreshAsync(string email, CancellationToken cancellationToken = default)
     {
         var user = await _authRepository.GetByEmailAsync(email, cancellationToken)

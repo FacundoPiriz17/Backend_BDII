@@ -26,16 +26,6 @@ public sealed class EntradaRepository : IEntradaRepository
               AND (
                     @puede_ver_todas = TRUE
                     OR LOWER(e.email_propietario_actual) = LOWER(@email_usuario)
-                    OR LOWER(c.email_usuario) = LOWER(@email_usuario)
-                    OR EXISTS (
-                        SELECT 1
-                        FROM transferencia t
-                        WHERE t.id_entrada = e.id_entrada
-                          AND (
-                                LOWER(t.email_origen) = LOWER(@email_usuario)
-                                OR LOWER(t.email_destino) = LOWER(@email_usuario)
-                              )
-                    )
                   );
             """;
 

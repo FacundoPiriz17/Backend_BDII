@@ -13,6 +13,73 @@ public sealed class ReporteRepository : IReporteRepository
         _connectionFactory = connectionFactory;
     }
 
+    public async Task<List<AuditoriaEntradaResponse>> GetAuditoriaAsync(
+        string? tipo,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+
+        const string sql = """
+            SELECT tipo, fecha, usuario, estado, monto, detalle, id_referencia
+            FROM (
+                SELECT 'compra' AS tipo, c.fecha_hora AS fecha, c.email_usuario AS usuario,
+                       c.estado::text AS estado, c.monto_total AS monto,
+                       NULL::text AS detalle, c.id_compra AS id_referencia
+                FROM compra c
+                UNION ALL
+                SELECT 'transferencia', t.fecha_hora, t.email_origen,
+                       t.estado::text, NULL::int,
+                       (t.email_origen || ' → ' || t.email_destino), t.id_transferencia
+                FROM transferencia t
+                UNION ALL
+                SELECT 'validacion', v.fecha_hora, d.email_funcionario,
+                       v.estado::text, NULL::int,
+                       ('Entrada #' || v.id_entrada::text), v.id_validacion
+                FROM valida v
+                INNER JOIN dispositivo_escaneo d ON d.id_dispositivo_escaneo = v.id_dispositivo
+            ) auditoria
+            WHERE (@tipo::text IS NULL OR tipo = @tipo::text)
+            ORDER BY fecha DESC
+            LIMIT @limit;
+            """;
+
+        await using var command = new NpgsqlCommand(sql, connection);
+
+        command.Parameters.Add(new NpgsqlParameter("tipo", NpgsqlTypes.NpgsqlDbType.Text)
+        {
+            Value = (object?)tipo ?? DBNull.Value
+        });
+        command.Parameters.AddWithValue("limit", limit);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        var items = new List<AuditoriaEntradaResponse>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            items.Add(new AuditoriaEntradaResponse
+            {
+                Tipo = reader.GetString(reader.GetOrdinal("tipo")),
+                Fecha = reader.GetDateTime(reader.GetOrdinal("fecha")),
+                Usuario = reader.IsDBNull(reader.GetOrdinal("usuario"))
+                    ? "—"
+                    : reader.GetString(reader.GetOrdinal("usuario")),
+                Estado = reader.IsDBNull(reader.GetOrdinal("estado"))
+                    ? null
+                    : reader.GetString(reader.GetOrdinal("estado")),
+                Monto = reader.IsDBNull(reader.GetOrdinal("monto"))
+                    ? null
+                    : reader.GetInt32(reader.GetOrdinal("monto")),
+                Detalle = reader.IsDBNull(reader.GetOrdinal("detalle"))
+                    ? null
+                    : reader.GetString(reader.GetOrdinal("detalle")),
+                IdReferencia = reader.GetInt32(reader.GetOrdinal("id_referencia")),
+            });
+        }
+
+        return items;
+    }
+
     public async Task<List<EventoMasVendidoResponse>> GetEventosMasVendidosAsync(
         int limit,
         CancellationToken cancellationToken = default)

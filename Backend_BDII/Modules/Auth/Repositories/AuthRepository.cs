@@ -13,6 +13,20 @@ public sealed class AuthRepository : IAuthRepository
         _connectionFactory = connectionFactory;
     }
 
+    public async Task<bool> ActualizarContrasenaAsync(string email, string passwordHash, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+
+        const string sql = "UPDATE login SET contrasena = @hash WHERE LOWER(email) = LOWER(@email);";
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("hash", passwordHash);
+        command.Parameters.AddWithValue("email", email.Trim().ToLowerInvariant());
+
+        var filas = await command.ExecuteNonQueryAsync(cancellationToken);
+        return filas > 0;
+    }
+
     public async Task<AuthUser?> GetByEmailAsync(string email, CancellationToken cancellationToken = default)
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
